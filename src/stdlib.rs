@@ -16,6 +16,7 @@ const MODULES: &[(&str, &str)] = &[
     ("json", include_str!("../stdlib/json.hsy")),
     ("thread", include_str!("../stdlib/thread.hsy")),
     ("testing", include_str!("../stdlib/testing.hsy")),
+    ("net", include_str!("../stdlib/net.hsy")),
 ];
 
 /// The source of a standard module.

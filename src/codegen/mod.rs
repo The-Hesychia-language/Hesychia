@@ -301,6 +301,10 @@ impl Emitter<'_> {
                 && used.contains(&format!("hsy_extern_{}", e.name))
                 && externs.insert(&e.name)
             {
+                if e.symbol.starts_with("hsy_net_") {
+                    self.types.uses_net = true;
+                    self.types.uses_alloc = true;
+                }
                 out += &self.extern_declaration(e);
             }
         }

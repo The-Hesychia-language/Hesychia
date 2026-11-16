@@ -148,7 +148,8 @@ pub fn build(input: &Input, options: &BuildOptions, build: &Build) -> Result<Pat
     fs::write(&c_path, &c_code).map_err(|e| format!("cannot write {}: {e}", c_path.display()))?;
     let intel = c_code.contains("__asm__ volatile");
     let threads = c_code.contains("#include <pthread.h>");
-    let flags = CFlags { release: options.release, intel_asm: intel, threads };
+    let net = c_code.contains("#include <winsock2.h>");
+    let flags = CFlags { release: options.release, intel_asm: intel, threads, net };
     let result = run_c_compiler(&compiler, build.platform, &c_path, &output, &flags);
     if !options.emit_c {
         let _ = fs::remove_file(&c_path);
@@ -194,6 +195,8 @@ struct CFlags {
     /// `asm` bodies are written in Intel syntax.
     intel_asm: bool,
     threads: bool,
+    /// Sockets are used: on Windows they are in their own library.
+    net: bool,
 }
 
 fn run_c_compiler(
@@ -210,6 +213,7 @@ fn run_c_compiler(
         .args(c_flags(platform, flags.release))
         .args(flags.intel_asm.then_some("-masm=intel"))
         .args(flags.threads.then_some("-pthread"))
+        .args((flags.net && platform.os == "windows").then_some("-lws2_32"))
         .arg("-lm")
         .status()
         .map_err(|e| format!("cannot run the C compiler `{compiler}` for {platform}: {e}"))?;

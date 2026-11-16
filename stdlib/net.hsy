@@ -1,0 +1,100 @@
+# net: TCP connections, which are `io.File`s read with `io.read` and written with `print`,
+# and UDP sockets. A host is a name or an IP address, IPv4 or IPv6.
+
+from io import File, IoError, from_connection
+
+@symbol("hsy_net_connect")
+priv extern fn c_connect(host: ptr[u8], port: i32) -> i64
+@symbol("hsy_net_listen")
+priv extern fn c_listen(host: ptr[u8], port: i32) -> i64
+@symbol("hsy_net_accept")
+priv extern fn c_accept(listener: i64) -> i64
+@symbol("hsy_net_udp")
+priv extern fn c_udp(host: ptr[u8], port: i32) -> i64
+@symbol("hsy_net_send")
+priv extern fn c_send(socket: i64, data: ptr[u8], count: size, host: ptr[u8], port: i32) -> i32
+@symbol("hsy_net_receive")
+priv extern fn c_receive(socket: i64, out: ptr[u8], count: size) -> i64
+@symbol("hsy_net_peer")
+priv extern fn c_peer(socket: i64) -> ptr[u8]
+@symbol("hsy_net_sender")
+priv extern fn c_sender() -> ptr[u8]
+@symbol("hsy_net_close")
+priv extern fn c_close(socket: i64)
+@symbol("hsy_net_wrap")
+priv extern fn c_wrap(socket: i64) -> ptr[u8]
+@symbol("hsy_net_error")
+priv extern fn c_error() -> ptr[u8]
+
+# A port open for connections, which `accept` takes one by one; closed at the end of its scope.
+manual struct Listener(Drop):
+    priv socket: i64
+    priv address: str
+
+    method drop(&mut self):
+        c_close(self.socket)
+
+# A UDP socket, which `send` and `receive` messages through; closed at the end of its scope.
+manual struct Socket(Drop):
+    priv socket: i64
+    priv address: str
+
+    method drop(&mut self):
+        c_close(self.socket)
+
+priv manual fn failure(address: &str) -> IoError:
+    return IoError(path=f"{address}", reason=str.from_c(c_error()))
+
+# A connection to `host` on `port`.
+manual fn connect(host: &str, port: i32) -> File raises IoError:
+    const address: str = f"{host}:{port}"
+    const socket: i64 = c_connect(host.to_c(), port)
+    if socket < 0:
+        raise failure(&address)
+    return from_connection(c_wrap(socket), &address)
+
+# Waits for connections on `port`; `host` is the address to take them on, "0.0.0.0" for any.
+manual fn listen(host: &str, port: i32) -> Listener raises IoError:
+    const address: str = f"{host}:{port}"
+    const socket: i64 = c_listen(host.to_c(), port)
+    if socket < 0:
+        raise failure(&address)
+    return Listener(socket=socket, address=address)
+
+# Waits for the next client, and gives its connection.
+manual fn accept(listener: &Listener) -> File raises IoError:
+    const socket: i64 = c_accept(listener.socket)
+    if socket < 0:
+        raise failure(&listener.address)
+    const peer: str = str.from_c(c_peer(socket))
+    return from_connection(c_wrap(socket), &peer)
+
+# A UDP socket on `port`, 0 for any free one.
+manual fn udp(host: &str, port: i32) -> Socket raises IoError:
+    const address: str = f"{host}:{port}"
+    const socket: i64 = c_udp(host.to_c(), port)
+    if socket < 0:
+        raise failure(&address)
+    return Socket(socket=socket, address=address)
+
+# Sends `text` as one message to `host` on `port`.
+manual fn send(socket: &Socket, text: &str, host: &str, port: i32) raises IoError:
+    if c_send(socket.socket, text.to_c(), byte_len(text), host.to_c(), port) != 0:
+        const address: str = f"{host}:{port}"
+        raise failure(&address)
+
+# Waits for the next message, and gives it with who sent it, as "host:port".
+manual fn receive(socket: &Socket) -> (str, str) raises IoError:
+    mut bytes: vector[u8] = []
+    for _ in range(65536):
+        bytes.push(0)
+    const count: i64 = c_receive(socket.socket, ptr(&bytes[0]), len(bytes))
+    if count < 0:
+        raise failure(&socket.address)
+    while i64(len(bytes)) > count:
+        bytes.pop()
+    const sender: str = str.from_c(c_sender())
+    const text: Optional[str] = str.from_bytes(&bytes)
+    if text is None:
+        raise IoError(path=sender, reason="not UTF-8 text")
+    return (text, sender)

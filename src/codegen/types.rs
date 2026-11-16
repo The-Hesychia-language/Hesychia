@@ -32,6 +32,8 @@ pub struct TypeRegistry<'a> {
     pub uses_scope: bool,
     pub uses_parallel: bool,
     pub uses_select: bool,
+    /// `net` is used: sockets, and the C library that has them on Windows.
+    pub uses_net: bool,
     /// Blocks of `shared[T]` values, defined after every other type: they hold a `T`.
     pub(super) blocks: String,
     /// The C name of the `@panic_handler` function.
@@ -59,6 +61,7 @@ impl<'a> TypeRegistry<'a> {
             uses_scope: false,
             uses_parallel: false,
             uses_select: false,
+            uses_net: false,
             blocks: String::new(),
             panic_handler,
         }
@@ -370,6 +373,11 @@ impl<'a> TypeRegistry<'a> {
         }
         if self.uses_str {
             out += super::runtime::STR;
+        }
+        if self.uses_net {
+            out += super::runtime::NET;
+        } else if self.uses_str {
+            out += super::runtime::CONN_STUB;
         }
         out
     }

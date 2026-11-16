@@ -232,6 +232,7 @@ The standard library is written in Hesychia, in `stdlib/`, and built into `hsy`:
 | `csv` | `load[vector](f, sep=",")` to rows of fields, `load[dict](f)` to a `dict` per row keyed by the header; `dump(rows, to=stdout)` writes either; `CsvError` |
 | `json` | `load(f)` to a `json.Value` (`Null`, `Bool`, `Number`, `Text`, `List`, `Object`), `dump(value, to=stdout, indent=0)`; `JsonError` |
 | `thread` | `spawn`, `channel`, `scope`, `atomic`, `mutex`; `parallel for` and `select` are part of the language |
+| `net` | `connect(host, port)` for a TCP connection, an `io.File` read with `io.read` and written with `print(text, to=conn)`; `listen(host, port)` for a `Listener` and `accept(listener)` for each client's connection; `udp(host, port)` for a `Socket`, `send(sock, text, host, port)` and `receive(sock)`, giving the message and its sender as `"host:port"`. IPv4 and IPv6; failures raise `IoError` |
 | `testing` | `expect(condition)`, `equal(a, b)`, for `@test` functions run by `hsy test` |
 
 An f-string formats a value after `:`, as Python does: `[[fill]align][+][0][width][,][.digits][kind]`.
@@ -250,7 +251,7 @@ A value can be moved inside a loop when the loop is left right after, by `return
 
 The modules share their words: `load` and `dump` for formats, `read` and `print` for text, `sys_` for direct system calls, `to=` for where writing goes, `end=` for where reading or writing stops, `unit=` for durations. Each module works on Linux, macOS and Windows.
 
-A local variable may take a prelude name (`sum = 0`). `for a, b in pairs:` takes each item apart, in a comprehension too (`[n for w, n in d.items()]`); `for w in ["a", "b"]:` goes over a list written in place; a loop over a temporary, `for w in s.split():`, owns it. A struct whose fields are all private is built empty with `S()`, which is how `dict` and `set` start. Only the parts of the standard library a program uses end up in its binary. A file is a module and a folder is a package, relative to the folder of the main file: `import net.http` reads `net/http.hsy` and makes its items available as `http.name`. Imports may be circular. Everything is public unless marked `priv`, which limits it to its file.
+A local variable may take a prelude name (`sum = 0`). `for a, b in pairs:` takes each item apart, in a comprehension too (`[n for w, n in d.items()]`); `for w in ["a", "b"]:` goes over a list written in place; a loop over a temporary, `for w in s.split():`, owns it. A struct whose fields are all private is built empty with `S()`, which is how `dict` and `set` start. Only the parts of the standard library a program uses end up in its binary. A file is a module and a folder is a package, relative to the folder of the main file: `import shop.cart` reads `shop/cart.hsy` and makes its items available as `cart.name`. Imports may be circular. Everything is public unless marked `priv`, which limits it to its file.
 
 ### comptime
 

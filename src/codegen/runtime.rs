@@ -200,7 +200,15 @@ __attribute__((noreturn)) HSY_UNUSED static void hsy_panic_text(const hsy_str* s
     __builtin_trap();
 }
 
-HSY_UNUSED static void hsy_print(const hsy_str* s, const hsy_str* end, void* stream) {
+int hsy_conn_write(uint8_t* conn, const uint8_t* data, size_t n);
+
+/* `connection`: the stream is a network connection of `net`, written without a buffer. */
+HSY_UNUSED static void hsy_print(const hsy_str* s, const hsy_str* end, void* stream, bool connection) {
+    if (connection) {
+        if (s->len) hsy_conn_write(stream, (const uint8_t*)s->data, s->len);
+        if (end->len) hsy_conn_write(stream, (const uint8_t*)end->data, end->len);
+        return;
+    }
     fwrite(s->data ? s->data : "", 1, s->len, (FILE*)stream);
     fwrite(end->data ? end->data : "", 1, end->len, (FILE*)stream);
 }
@@ -697,6 +705,300 @@ static size_t hsy_select(hsy_chan** chans, void** outs, size_t n, int64_t limit,
     pthread_mutex_destroy(&waiter.lock);
     pthread_cond_destroy(&waiter.ready);
     return which;
+}
+
+"#;
+
+/// What `io` calls on a connection, in a program that makes none: never reached.
+pub const CONN_STUB: &str = r#"int hsy_conn_getc(uint8_t* conn);
+size_t hsy_conn_read(uint8_t* out, size_t count, uint8_t* conn);
+int hsy_conn_failed(uint8_t* conn);
+const uint8_t* hsy_conn_error(void);
+void hsy_conn_close(uint8_t* conn);
+int hsy_conn_getc(uint8_t* conn) { (void)conn; return -1; }
+size_t hsy_conn_read(uint8_t* out, size_t count, uint8_t* conn) { (void)out; (void)count; (void)conn; return 0; }
+int hsy_conn_failed(uint8_t* conn) { (void)conn; return 1; }
+int hsy_conn_write(uint8_t* conn, const uint8_t* data, size_t n) { (void)conn; (void)data; (void)n; return -1; }
+const uint8_t* hsy_conn_error(void) { return (const uint8_t*)""; }
+void hsy_conn_close(uint8_t* conn) { (void)conn; }
+
+"#;
+
+/// `net`: TCP connections, read through a buffer and written without one, and UDP sockets.
+/// The last failure of the thread is kept as text, for `IoError`.
+pub const NET: &str = r#"#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+typedef SOCKET hsy_sock;
+#define HSY_NO_SOCKET INVALID_SOCKET
+#define hsy_sock_close closesocket
+#define HSY_NO_SIGNAL 0
+#else
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netdb.h>
+#include <unistd.h>
+typedef int hsy_sock;
+#define HSY_NO_SOCKET (-1)
+#define hsy_sock_close close
+#ifdef MSG_NOSIGNAL
+#define HSY_NO_SIGNAL MSG_NOSIGNAL
+#else
+#define HSY_NO_SIGNAL 0
+#endif
+#endif
+
+static __thread char hsy_net_reason[256];
+static __thread char hsy_net_name[1100];
+
+/* The reason the system gives for the last failure. */
+static void hsy_net_failed(void) {
+#ifdef _WIN32
+    int code = WSAGetLastError();
+    DWORD n = FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, NULL, (DWORD)code, 0,
+                             hsy_net_reason, sizeof hsy_net_reason, NULL);
+    while (n > 0 && (hsy_net_reason[n - 1] == '\n' || hsy_net_reason[n - 1] == '\r' || hsy_net_reason[n - 1] == '.'))
+        hsy_net_reason[--n] = 0;
+    if (n == 0) snprintf(hsy_net_reason, sizeof hsy_net_reason, "network error %d", code);
+#else
+    snprintf(hsy_net_reason, sizeof hsy_net_reason, "%s", strerror(errno));
+#endif
+}
+
+const uint8_t* hsy_net_error(void);
+const uint8_t* hsy_conn_error(void);
+const uint8_t* hsy_net_error(void) { return (const uint8_t*)hsy_net_reason; }
+const uint8_t* hsy_conn_error(void) { return (const uint8_t*)hsy_net_reason; }
+
+static struct addrinfo* hsy_net_resolve(const char* host, int32_t port, int type, int family, bool passive) {
+#ifdef _WIN32
+    WSADATA started;
+    WSAStartup(MAKEWORD(2, 2), &started);
+#endif
+    if (port < 0 || port > 65535) {
+        snprintf(hsy_net_reason, sizeof hsy_net_reason, "the port %d is not between 0 and 65535", (int)port);
+        return NULL;
+    }
+    char service[8];
+    snprintf(service, sizeof service, "%d", (int)port);
+    struct addrinfo hints;
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family = family;
+    hints.ai_socktype = type;
+    hints.ai_flags = passive ? AI_PASSIVE : 0;
+    struct addrinfo* found = NULL;
+    int code = getaddrinfo(host[0] ? host : NULL, service, &hints, &found);
+    if (code != 0) {
+        snprintf(hsy_net_reason, sizeof hsy_net_reason, "%s", gai_strerror(code));
+        return NULL;
+    }
+    return found;
+}
+
+static hsy_sock hsy_net_socket(const struct addrinfo* a) {
+    hsy_sock s = socket(a->ai_family, a->ai_socktype, a->ai_protocol);
+#ifdef SO_NOSIGPIPE
+    if (s != HSY_NO_SOCKET) {
+        int on = 1;
+        setsockopt(s, SOL_SOCKET, SO_NOSIGPIPE, &on, sizeof on);
+    }
+#endif
+    return s;
+}
+
+/* `host:port`, or `[host]:port` for IPv6, as numbers. */
+static const uint8_t* hsy_net_text(const struct sockaddr* a, socklen_t len) {
+    char host[1025], port[32];
+    if (getnameinfo(a, len, host, sizeof host, port, sizeof port, NI_NUMERICHOST | NI_NUMERICSERV) != 0)
+        snprintf(hsy_net_name, sizeof hsy_net_name, "?");
+    else
+        snprintf(hsy_net_name, sizeof hsy_net_name, a->sa_family == AF_INET6 ? "[%s]:%s" : "%s:%s", host, port);
+    return (const uint8_t*)hsy_net_name;
+}
+
+/* A socket for the first address of `host` that takes it: connected, or bound. -1 on failure. */
+static int64_t hsy_net_open(const char* host, int32_t port, int type, bool bind_it) {
+    struct addrinfo* found = hsy_net_resolve(host, port, type, AF_UNSPEC, bind_it);
+    if (!found) return -1;
+    hsy_sock s = HSY_NO_SOCKET;
+    for (struct addrinfo* a = found; a; a = a->ai_next) {
+        s = hsy_net_socket(a);
+        if (s == HSY_NO_SOCKET) {
+            hsy_net_failed();
+            continue;
+        }
+#ifndef _WIN32
+        if (bind_it) {
+            int on = 1;
+            setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &on, sizeof on);
+        }
+#endif
+        int done = bind_it ? bind(s, a->ai_addr, (socklen_t)a->ai_addrlen) : connect(s, a->ai_addr, (socklen_t)a->ai_addrlen);
+        if (done == 0) break;
+        hsy_net_failed();
+        hsy_sock_close(s);
+        s = HSY_NO_SOCKET;
+    }
+    freeaddrinfo(found);
+    return s == HSY_NO_SOCKET ? -1 : (int64_t)s;
+}
+
+int64_t hsy_net_connect(const char* host, int32_t port);
+int64_t hsy_net_listen(const char* host, int32_t port);
+int64_t hsy_net_accept(int64_t listener);
+int64_t hsy_net_udp(const char* host, int32_t port);
+int hsy_net_send(int64_t s, const uint8_t* data, size_t n, const char* host, int32_t port);
+int64_t hsy_net_receive(int64_t s, uint8_t* out, size_t size);
+const uint8_t* hsy_net_peer(int64_t s);
+const uint8_t* hsy_net_sender(void);
+void hsy_net_close(int64_t s);
+uint8_t* hsy_net_wrap(int64_t s);
+
+int64_t hsy_net_connect(const char* host, int32_t port) { return hsy_net_open(host, port, SOCK_STREAM, false); }
+
+int64_t hsy_net_listen(const char* host, int32_t port) {
+    int64_t s = hsy_net_open(host, port, SOCK_STREAM, true);
+    if (s >= 0 && listen((hsy_sock)s, 128) != 0) {
+        hsy_net_failed();
+        hsy_sock_close((hsy_sock)s);
+        return -1;
+    }
+    return s;
+}
+
+int64_t hsy_net_accept(int64_t listener) {
+    hsy_sock s = accept((hsy_sock)listener, NULL, NULL);
+    if (s == HSY_NO_SOCKET) {
+        hsy_net_failed();
+        return -1;
+    }
+#ifdef SO_NOSIGPIPE
+    int on = 1;
+    setsockopt(s, SOL_SOCKET, SO_NOSIGPIPE, &on, sizeof on);
+#endif
+    return (int64_t)s;
+}
+
+const uint8_t* hsy_net_peer(int64_t s) {
+    struct sockaddr_storage a;
+    socklen_t len = sizeof a;
+    if (getpeername((hsy_sock)s, (struct sockaddr*)&a, &len) != 0) return (const uint8_t*)"?";
+    return hsy_net_text((struct sockaddr*)&a, len);
+}
+
+int64_t hsy_net_udp(const char* host, int32_t port) { return hsy_net_open(host, port, SOCK_DGRAM, true); }
+
+int hsy_net_send(int64_t s, const uint8_t* data, size_t n, const char* host, int32_t port) {
+    struct sockaddr_storage own;
+    socklen_t len = sizeof own;
+    int family = getsockname((hsy_sock)s, (struct sockaddr*)&own, &len) == 0 ? own.ss_family : AF_UNSPEC;
+    struct addrinfo* found = hsy_net_resolve(host, port, SOCK_DGRAM, family, false);
+    if (!found) return -1;
+    long sent = (long)sendto((hsy_sock)s, (const char*)data, (int)n, 0, found->ai_addr, (socklen_t)found->ai_addrlen);
+    freeaddrinfo(found);
+    if (sent < 0) {
+        hsy_net_failed();
+        return -1;
+    }
+    return 0;
+}
+
+int64_t hsy_net_receive(int64_t s, uint8_t* out, size_t size) {
+    struct sockaddr_storage from;
+    socklen_t len = sizeof from;
+    long n = (long)recvfrom((hsy_sock)s, (char*)out, (int)size, 0, (struct sockaddr*)&from, &len);
+    if (n < 0) {
+        hsy_net_failed();
+        return -1;
+    }
+    hsy_net_text((struct sockaddr*)&from, len);
+    return n;
+}
+
+const uint8_t* hsy_net_sender(void) { return (const uint8_t*)hsy_net_name; }
+
+void hsy_net_close(int64_t s) { hsy_sock_close((hsy_sock)s); }
+
+/* A connection as `io` reads it: through a buffer. */
+typedef struct hsy_conn {
+    hsy_sock sock;
+    size_t len, pos;
+    bool failed;
+    uint8_t data[4096];
+} hsy_conn;
+
+uint8_t* hsy_net_wrap(int64_t s) {
+    hsy_conn* c = hsy_alloc(sizeof *c);
+    c->sock = (hsy_sock)s;
+    c->len = c->pos = 0;
+    c->failed = false;
+    return (uint8_t*)c;
+}
+
+/* Bytes in the buffer, waiting for some if it is empty; false at the end, or on a failure. */
+static bool hsy_conn_fill(hsy_conn* c) {
+    if (c->pos < c->len) return true;
+    for (;;) {
+        long n = (long)recv(c->sock, (char*)c->data, (int)sizeof c->data, 0);
+        if (n > 0) {
+            c->pos = 0;
+            c->len = (size_t)n;
+            return true;
+        }
+#ifndef _WIN32
+        if (n < 0 && errno == EINTR) continue;
+#endif
+        if (n < 0) {
+            c->failed = true;
+            hsy_net_failed();
+        }
+        return false;
+    }
+}
+
+int hsy_conn_getc(uint8_t* conn);
+size_t hsy_conn_read(uint8_t* out, size_t count, uint8_t* conn);
+int hsy_conn_failed(uint8_t* conn);
+void hsy_conn_close(uint8_t* conn);
+
+int hsy_conn_getc(uint8_t* conn) {
+    hsy_conn* c = (hsy_conn*)conn;
+    return hsy_conn_fill(c) ? c->data[c->pos++] : -1;
+}
+
+/* What the buffer holds, or what one wait brings, up to `count` bytes; 0 at the end. */
+size_t hsy_conn_read(uint8_t* out, size_t count, uint8_t* conn) {
+    hsy_conn* c = (hsy_conn*)conn;
+    if (!hsy_conn_fill(c)) return 0;
+    size_t n = c->len - c->pos < count ? c->len - c->pos : count;
+    memcpy(out, c->data + c->pos, n);
+    c->pos += n;
+    return n;
+}
+
+int hsy_conn_failed(uint8_t* conn) { return ((hsy_conn*)conn)->failed; }
+
+int hsy_conn_write(uint8_t* conn, const uint8_t* data, size_t n) {
+    hsy_conn* c = (hsy_conn*)conn;
+    while (n > 0) {
+        long sent = (long)send(c->sock, (const char*)data, (int)(n > 65536 ? 65536 : n), HSY_NO_SIGNAL);
+#ifndef _WIN32
+        if (sent < 0 && errno == EINTR) continue;
+#endif
+        if (sent < 0) {
+            hsy_net_failed();
+            return -1;
+        }
+        data += sent;
+        n -= (size_t)sent;
+    }
+    return 0;
+}
+
+void hsy_conn_close(uint8_t* conn) {
+    hsy_conn* c = (hsy_conn*)conn;
+    hsy_sock_close(c->sock);
+    free(c);
 }
 
 "#;

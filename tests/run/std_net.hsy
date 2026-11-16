@@ -1,0 +1,56 @@
+from io import print
+import io
+import net
+from thread import spawn
+from io import File
+from net import Listener
+
+# Answers one client: each line it sends comes back, until it leaves.
+manual fn serve(owned listener: Listener):
+    try:
+        const conn: File = check net.accept(&listener)
+        mut open: bool = True
+        while open:
+            const line: Optional[str] = check io.read(&conn)
+            if line is None:
+                open = False
+            else:
+                print(f"echo {line}", to=conn)
+    except IoError as e:
+        print(f"server: {e.reason}")
+
+managed fn main():
+    listener = net.listen("127.0.0.1", 47210)
+    t = spawn(serve, listener)
+    conn = net.connect("127.0.0.1", 47210)
+    for text in ["hello", "été 2026"]:
+        print(text, to=conn)
+        answer = io.read(conn)
+        if answer is not None:
+            print(answer)
+    io.close(conn)
+    t.join()
+
+    a = net.udp("127.0.0.1", 47211)
+    b = net.udp("127.0.0.1", 47212)
+    net.send(a, "ping", "127.0.0.1", 47212)
+    message, sender = net.receive(b)
+    print(f"{message} from {sender}")
+    net.send(b, "pong", "127.0.0.1", 47211)
+    reply, _ = net.receive(a)
+    print(reply)
+
+    try:
+        net.connect("127.0.0.1", 70000)
+    except IoError as e:
+        print(f"{e.path}: {e.reason}")
+    try:
+        net.connect("127.0.0.1", 47219)
+    except IoError as e:
+        print(f"refused {e.path}")
+# expect: echo hello
+# expect: echo été 2026
+# expect: ping from 127.0.0.1:47211
+# expect: pong
+# expect: 127.0.0.1:70000: the port 70000 is not between 0 and 65535
+# expect: refused 127.0.0.1:47219

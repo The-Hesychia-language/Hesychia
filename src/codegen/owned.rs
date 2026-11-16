@@ -286,7 +286,7 @@ impl Emitter<'_> {
                 let (setup_end, end, clean_end) = self.read_str(&args[1]);
                 let to = self.emit_expr(&args[2]);
                 Some(format!(
-                    "({{ {setup_text}{setup_end}hsy_print({text}, {end}, ({to})->handle); {clean_text}{clean_end}}})"
+                    "({{ {setup_text}{setup_end}hsy_print({text}, {end}, ({to})->handle, ({to})->connection); {clean_text}{clean_end}}})"
                 ))
             }
             (Builtin::Panic | Builtin::StrLen | Builtin::StrBytes, _) => {
