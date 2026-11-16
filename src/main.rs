@@ -26,6 +26,7 @@ usage:
   hsy build [<file.hsy>] [--release] [--target <triple>] [-o <output>] [--emit-c] [--warn-copies]
   hsy run [<file.hsy>] [--release] [--warn-copies]
   hsy test [<file.hsy>] [<part of a test name>]
+  hsy --version
 
   Without a file, hsy builds the project whose hesychia.toml is in this folder or above,
   for each target of its [settings] targets (the host by default).
@@ -46,6 +47,10 @@ fn main() -> ExitCode {
 
 fn run(args: &[String]) -> Result<ExitCode, String> {
     let (command, rest) = args.split_first().ok_or(USAGE)?;
+    if command == "--version" {
+        println!("hsy {}", env!("CARGO_PKG_VERSION"));
+        return Ok(ExitCode::SUCCESS);
+    }
     if command == "new" {
         let [name] = rest else { return Err(USAGE.into()) };
         let dir = project::create(name)?;

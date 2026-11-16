@@ -1,6 +1,6 @@
 # Run by tests/test_command.rs: some of these tests pass, others fail on purpose.
 from io import print
-from test import expect, equal
+from testing import expect, equal
 
 manual fn twice(n: i64) -> i64:
     return n * 2

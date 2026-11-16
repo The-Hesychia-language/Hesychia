@@ -232,6 +232,7 @@ The standard library is written in Hesychia, in `stdlib/`, and built into `hsy`:
 | `csv` | `load[vector](f, sep=",")` to rows of fields, `load[dict](f)` to a `dict` per row keyed by the header; `dump(rows, to=stdout)` writes either; `CsvError` |
 | `json` | `load(f)` to a `json.Value` (`Null`, `Bool`, `Number`, `Text`, `List`, `Object`), `dump(value, to=stdout, indent=0)`; `JsonError` |
 | `thread` | `spawn`, `channel`, `scope`, `atomic`, `mutex`; `parallel for` and `select` are part of the language |
+| `testing` | `expect(condition)`, `equal(a, b)`, for `@test` functions run by `hsy test` |
 
 An f-string formats a value after `:`, as Python does: `[[fill]align][+][0][width][,][.digits][kind]`.
 
@@ -287,6 +288,17 @@ manual fn load[R](f: &File) -> vector[row(R)]:
 `R == dict` holds for any `dict`, `R == dict[str, str]` for that type only. A generic type without its arguments can be given to a type parameter, as in `csv.load[dict](f)`, for `comptime` code to test. `item(T)` is the type of what `T` holds, and `panic("...")` stops the compilation with its message, reported where the call is written. A generic function whose signature uses a `comptime fn`, or whose body tests its type parameters, is checked for each set of types it is called with. A `comptime fn` that runs more than a million steps is stopped. Defaults may be `None` for an `Optional` parameter. In `manual`, a value with nothing to release can be lent where it is computed, `min(&(a + b), c)`.
 
 Only the selected branch of a `comptime if` is type-checked. `target` describes the machine the program is built for (see `--target`): `os` (`linux`, `windows`, `macos`), `arch` (`x86_64`, `aarch64`, `riscv64`), `env` (`gnu`, `musl`, or empty on macOS), `pointer_bits`, `endian` and `debug`.
+
+## Install
+
+Hesychia needs `git`, [Rust](https://rustup.rs) to build the compiler, and a C compiler (`xcode-select --install` on macOS, `build-essential` on Debian and Ubuntu) to build programs.
+
+```sh
+curl -fsSLO https://raw.githubusercontent.com/The-Hesychia-language/Hesychia/main/install.sh
+chmod +x install.sh && ./install.sh
+```
+
+The script downloads the sources into `~/.hesychia/src`, builds `hsy` and puts it in `~/.hesychia/bin`, which it adds to `PATH` in `~/.bashrc` and `~/.zshrc` (and `~/.bash_profile` on macOS), once. Run it again to update: it fetches the latest sources and replaces the old `hsy`. `HESYCHIA_HOME` installs elsewhere than `~/.hesychia`. To remove Hesychia, delete `~/.hesychia` and the two lines under `# Hesychia` in those files.
 
 ## Usage
 
@@ -369,10 +381,10 @@ The extension for [Zed](https://zed.dev) lives in its own repository, [Zed-LSP](
 
 ## Testing Hesychia programs
 
-A test is a function marked `@test`, with no parameters and no result, in `managed` or `manual` code. It goes beside the code it checks, or in a project's `tests/` folder. The `test` module checks with `expect(condition)` and `equal(a, b)`, which writes both values when they differ. A test fails when a check fails, when an error leaves it, or when the program stops on a fault.
+A test is a function marked `@test`, with no parameters and no result, in `managed` or `manual` code. It goes beside the code it checks, or in a project's `tests/` folder. The `testing` module checks with `expect(condition)` and `equal(a, b)`, which writes both values when they differ. A test fails when a check fails, when an error leaves it, or when the program stops on a fault.
 
 ```python
-from test import expect, equal
+from testing import expect, equal
 
 @test
 managed fn sorts():
