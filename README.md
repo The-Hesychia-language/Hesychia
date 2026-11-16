@@ -7,6 +7,17 @@ Hesychia is a compiled programming language with two levels:
 
 The compiler, `hsy`, is written in Rust and emits C11, which the system C compiler turns into a small native binary.
 
+## Install
+
+Hesychia needs `git`, [Rust](https://rustup.rs) 1.88 or later to build the compiler (`rustup update stable` brings an older one up to date), and a C compiler (`xcode-select --install` on macOS, `build-essential` on Debian and Ubuntu) to build programs.
+
+```sh
+curl -fsSLO https://raw.githubusercontent.com/The-Hesychia-language/Hesychia/main/install.sh
+chmod +x install.sh && ./install.sh
+```
+
+The script downloads the sources into `~/.hesychia/src`, builds `hsy` and puts it in `~/.hesychia/bin`, which it adds to `PATH` in `~/.bashrc` and `~/.zshrc` (and `~/.bash_profile` on macOS), once. Run it again to update: it fetches the latest sources and replaces the old `hsy`. `HESYCHIA_HOME` installs elsewhere than `~/.hesychia`. To remove Hesychia, delete `~/.hesychia` and the two lines under `# Hesychia` in those files.
+
 ## Status
 
 Milestones 1 to 6: the `manual` level with structs, enums, ownership, strings, vectors, errors, traits, generic functions and lambdas, across several modules. Milestone 7: the `managed` level.
@@ -289,17 +300,6 @@ manual fn load[R](f: &File) -> vector[row(R)]:
 `R == dict` holds for any `dict`, `R == dict[str, str]` for that type only. A generic type without its arguments can be given to a type parameter, as in `csv.load[dict](f)`, for `comptime` code to test. `item(T)` is the type of what `T` holds, and `panic("...")` stops the compilation with its message, reported where the call is written. A generic function whose signature uses a `comptime fn`, or whose body tests its type parameters, is checked for each set of types it is called with. A `comptime fn` that runs more than a million steps is stopped. Defaults may be `None` for an `Optional` parameter. In `manual`, a value with nothing to release can be lent where it is computed, `min(&(a + b), c)`.
 
 Only the selected branch of a `comptime if` is type-checked. `target` describes the machine the program is built for (see `--target`): `os` (`linux`, `windows`, `macos`), `arch` (`x86_64`, `aarch64`, `riscv64`), `env` (`gnu`, `musl`, or empty on macOS), `pointer_bits`, `endian` and `debug`.
-
-## Install
-
-Hesychia needs `git`, [Rust](https://rustup.rs) 1.88 or later to build the compiler (`rustup update stable` brings an older one up to date), and a C compiler (`xcode-select --install` on macOS, `build-essential` on Debian and Ubuntu) to build programs.
-
-```sh
-curl -fsSLO https://raw.githubusercontent.com/The-Hesychia-language/Hesychia/main/install.sh
-chmod +x install.sh && ./install.sh
-```
-
-The script downloads the sources into `~/.hesychia/src`, builds `hsy` and puts it in `~/.hesychia/bin`, which it adds to `PATH` in `~/.bashrc` and `~/.zshrc` (and `~/.bash_profile` on macOS), once. Run it again to update: it fetches the latest sources and replaces the old `hsy`. `HESYCHIA_HOME` installs elsewhere than `~/.hesychia`. To remove Hesychia, delete `~/.hesychia` and the two lines under `# Hesychia` in those files.
 
 ## Usage
 
