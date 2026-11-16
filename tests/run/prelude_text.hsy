@@ -1,0 +1,32 @@
+from io import print
+
+manual fn show(words: &vector[str]):
+    print(f"{len(words)} {words}")
+
+managed fn main():
+    s = "  Héllo, wörld  "
+    t = s.strip()
+    print(f"[{t}] [{s.strip(side=Side.Start)}] [{s.strip(side=Side.End)}] {t.upper()} {t.lower()}")
+    print(f"{t.find("wö")} {t[1:4]} {t[:2]} {t[7:]} {"lo" in t} {t.replace("l", "L")}")
+    show("a,b,,c".split(","))
+    show("  one two   three ".split())
+    print("-".join(["x", "y", "z"]))
+    n = i64(" -42 ") + 1
+    f = f64("2.5e1")
+    print(f"{n} {f} {u8("255")} {i8("-128")} {str(3.5)} {str([1, 2])}")
+    try:
+        print(f"{i32("12x")}")
+    except ParseError as e:
+        print(f"bad {e.text}")
+    try:
+        print(f"{u8("256")}")
+    except ParseError as e:
+        print(f"bad {e.text}")
+# expect: [Héllo, wörld] [Héllo, wörld  ] [  Héllo, wörld] HéLLO, WöRLD héllo, wörld
+# expect: 7 éll Hé wörld True HéLLo, wörLd
+# expect: 4 ['a', 'b', '', 'c']
+# expect: 3 ['one', 'two', 'three']
+# expect: x-y-z
+# expect: -41 25.0 255 -128 3.5 [1, 2]
+# expect: bad 12x
+# expect: bad 256

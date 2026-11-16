@@ -1,0 +1,9 @@
+manual struct Box:
+    value: i32
+
+manual fn change(b: &Box):
+    b.value = 2
+
+manual fn main():
+    pass
+# error: cannot assign to `b.value`

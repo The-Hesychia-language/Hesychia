@@ -1,0 +1,54 @@
+from io import print
+
+trait Shape:
+    method area(&self) -> f64
+
+manual struct Square(Shape):
+    side: f64
+
+    method area(&self) -> f64:
+        return self.side * self.side
+
+manual struct Money(Add):
+    cents: i64
+
+    method add(&self, other: &Money) -> Money:
+        return Money(self.cents + other.cents)
+
+manual fn total[T: Add](values: &vector[T], owned start: T) -> T:
+    mut sum: T = start
+    for i in range(len(values)):
+        sum = sum + values[i]
+    return sum
+
+manual fn first_area[S: Shape](shapes: &vector[S]) -> f64:
+    return shapes[0].area()
+
+manual fn count[T: Equal](values: &vector[T], wanted: &T) -> i32:
+    mut n: i32 = 0
+    for i in range(len(values)):
+        if values[i] == wanted:
+            n += 1
+    return n
+
+manual fn pair[A, B](owned a: A, owned b: B) -> (A, B):
+    return (a, b)
+
+manual fn main():
+    const ints: vector[i64] = [1, 2, 3]
+    print(f"{total(&ints, 10)}")
+    const words: vector[str] = ["a", "b"]
+    print(total(&words, ">"))
+    const money: vector[Money] = [Money(150), Money(250)]
+    print(f"{total(&money, Money(0)).cents}")
+    const squares: vector[Square] = [Square(3.0)]
+    print(f"{first_area(&squares)}")
+    print(f"{count(&words, &"b")} {count[i64](&ints, &4)}")
+    const (n, s): (i32, str) = pair(7, "seven")
+    print(f"{n} {s}")
+# expect: 16
+# expect: >ab
+# expect: 400
+# expect: 9.0
+# expect: 1 0
+# expect: 7 seven

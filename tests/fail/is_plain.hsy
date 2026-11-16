@@ -1,0 +1,4 @@
+manual fn main():
+    const n: i32 = 1
+    const b: bool = n is None
+# error: a `i32` value is never `None`

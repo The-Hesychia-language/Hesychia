@@ -1,0 +1,28 @@
+from io import print
+
+manual fn sum(values: &vector[i32]) -> i64:
+    mut total: i64 = 0
+    for x in values:
+        total += i64(x)
+    return total
+
+managed fn longest(words: vector[str]) -> i64:
+    best = 0
+    for w in words:
+        if len(w) > best:
+            best = len(w)
+    return best
+
+managed fn main():
+    v = vector[i32]()
+    v.push(1)
+    v.push(2)
+    for x in v:
+        v.push(x * 10)
+    print(f"{sum(v)} {len(v)}")
+    words = vector[str]()
+    words.push("hesychia")
+    words.push("rust")
+    print(f"{longest(words)}")
+# expect: 33 4
+# expect: 8

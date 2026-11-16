@@ -1,0 +1,4 @@
+manual fn main():
+    const n: i32 = 4
+    const f: fn() -> i32 = lambda [n] () -> i32: n
+# error: lambdas capture by reference: write `&name` or `&mut name`

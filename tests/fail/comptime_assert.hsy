@@ -1,0 +1,5 @@
+comptime assert(size_of[u32]() == 8, "u32 is not 8 bytes")
+
+manual fn main():
+    pass
+# error: u32 is not 8 bytes

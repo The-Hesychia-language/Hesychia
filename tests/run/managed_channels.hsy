@@ -1,0 +1,18 @@
+from io import print
+from thread import spawn, channel
+
+managed fn produce(tx: sender[i32]):
+    for i in range(4):
+        tx.send(i * i)
+
+managed fn main():
+    tx, rx = channel[i32]()
+    t = spawn(produce, tx)
+    total = 0
+    for _ in range(4):
+        got = rx.receive()
+        if got is not None:
+            total += got
+    t.join()
+    print(f"{total}")
+# expect: 14

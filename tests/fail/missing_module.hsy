@@ -1,0 +1,5 @@
+import lib.nowhere
+
+manual fn main():
+    pass
+# error: module `lib.nowhere` not found

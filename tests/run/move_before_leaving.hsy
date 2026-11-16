@@ -1,0 +1,27 @@
+from io import print
+
+manual fn keep(owned s: str) -> size:
+    return len(s)
+
+manual fn first_long(owned text: str, words: &vector[str]) -> size:
+    for w in words:
+        if len(w) > 3:
+            return keep(text)
+    return 0
+
+manual fn main():
+    const words: vector[str] = ["a", "pears", "figs"]
+    print(f"{first_long(f"x{12}", &words)}")
+    const text: str = f"b{345}"
+    mut i: i32 = 0
+    while True:
+        i += 1
+        if i == 2:
+            print(f"{keep(text)}")
+            break
+    for w in ["x", "yy"]:
+        print(w)
+# expect: 3
+# expect: 4
+# expect: x
+# expect: yy

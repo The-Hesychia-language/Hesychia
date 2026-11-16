@@ -1,0 +1,7 @@
+@align(12)
+manual struct Block:
+    value: u8
+
+manual fn main():
+    pass
+# error: `@align(N)` takes a power of two

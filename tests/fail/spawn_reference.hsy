@@ -1,0 +1,9 @@
+from thread import spawn
+
+manual fn count(values: &vector[i32]) -> size:
+    return len(values)
+
+manual fn main():
+    const values: vector[i32] = [1, 2]
+    const t: thread[size] = spawn(count, &values)
+# error: is a reference, which cannot go to another thread

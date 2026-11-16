@@ -1,0 +1,5 @@
+from lib.secret import hidden
+
+manual fn main():
+    pass
+# error: `hidden` is private to module `lib.secret`

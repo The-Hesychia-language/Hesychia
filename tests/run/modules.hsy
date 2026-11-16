@@ -1,0 +1,9 @@
+import lib.math
+from lib.util import twice as double
+from lib.math import SCALE
+
+extern fn printf(fmt: ptr[u8], ...) -> i32
+
+manual fn main():
+    printf("%lld %lld %lld\n".to_c(), math.scaled(3), double(21), SCALE + math.SCALE)
+# expect: 60 42 20

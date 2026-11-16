@@ -1,0 +1,24 @@
+extern fn printf(fmt: ptr[u8], ...) -> i32
+
+manual fn main():
+    mut sum: i64 = 0
+    for i in range(1, 11):
+        sum += i64(i) ** 2
+    printf("%lld\n".to_c(), sum)
+
+    for j in range(10, 0, -3):
+        printf("%d ".to_c(), j)
+    printf("\n".to_c())
+
+    const step: u8 = 100
+    for k in range(u8(0), 255, step):
+        printf("%u ".to_c(), k)
+    printf("\n".to_c())
+
+    for _ in range(3):
+        printf("x".to_c())
+    printf(" %.1f %d\n".to_c(), 2.0 ** 10.0, 3 ** 4)
+# expect: 385
+# expect: 10 7 4 1 
+# expect: 0 100 200 
+# expect: xxx 1024.0 81

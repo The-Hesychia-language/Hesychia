@@ -1,0 +1,7 @@
+manual struct Pair[T]:
+    a: T
+    b: T
+
+manual fn main():
+    const p: Pair[i32] = Pair(1, True)
+# error: expected `i32`, found `bool`

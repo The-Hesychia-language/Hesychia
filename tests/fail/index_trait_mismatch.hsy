@@ -1,0 +1,9 @@
+manual struct Box(Index):
+    value: i32
+
+    method index(&self, key: &i32) -> i32:
+        return self.value
+
+manual fn main():
+    pass
+# error: `Box.index` does not match the trait `Index`

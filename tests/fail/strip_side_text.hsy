@@ -1,0 +1,5 @@
+from io import print
+
+managed fn main():
+    print("  a ".strip(side="start"))
+# error: expected `Side`

@@ -1,0 +1,10 @@
+comptime fn spin(n: i64) -> i64:
+    while True:
+        n += 1
+    return n
+
+comptime N: i64 = spin(1)
+
+manual fn main():
+    pass
+# error: this `comptime fn` runs too long

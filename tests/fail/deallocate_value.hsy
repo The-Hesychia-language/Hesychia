@@ -1,0 +1,3 @@
+manual fn main():
+    const n: i32 = deallocate(3)
+# error: expected a `heap` value, found `i32`

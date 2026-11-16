@@ -1,0 +1,16 @@
+from io import print
+
+manual fn dot(a: SIMD[f32, 4], b: SIMD[f32, 4]) -> f32:
+    const p: SIMD[f32, 4] = a * b
+    return p[0] + p[1] + p[2] + p[3]
+
+manual fn main():
+    const a: SIMD[f32, 4] = SIMD[f32, 4](1.0, 2.0, 3.0, 4.0)
+    const twos: SIMD[f32, 4] = SIMD[f32, 4](2.0)
+    mut sum: SIMD[f32, 4] = a + twos
+    sum[0] = 10.0
+    print(f"{sum[0]} {sum[3]} {dot(a, twos)}")
+    const masks: SIMD[u8, 16] = SIMD[u8, 16](255) & SIMD[u8, 16](15)
+    print(f"{masks[15]} {size_of[SIMD[u8, 16]]()}")
+# expect: 10.0 6.0 20.0
+# expect: 15 16

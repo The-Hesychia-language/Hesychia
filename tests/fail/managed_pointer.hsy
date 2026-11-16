@@ -1,0 +1,4 @@
+managed fn main():
+    x = 5
+    p = ptr(&x)
+# error: `ptr(&x)` is only for `manual` code

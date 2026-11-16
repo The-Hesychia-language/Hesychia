@@ -1,0 +1,4 @@
+managed fn main():
+    asm(clobber("rax")):
+        "nop"
+# error: `asm` is only for `manual` code

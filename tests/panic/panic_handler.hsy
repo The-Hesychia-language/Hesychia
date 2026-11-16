@@ -1,0 +1,12 @@
+from io import print
+
+@panic_handler
+manual fn on_panic(message: &str):
+    print(f"handled: {message}")
+
+manual fn main():
+    const values: array[i32, 2] = [1, 2]
+    mut i: size = 1
+    i += 1
+    print(f"{values[i]}")
+# expect: handled: the program stopped on a fault

@@ -1,0 +1,36 @@
+from io import print
+from thread import scope, atomic
+
+manual fn part_sum(values: &vector[i64], start: size, end: size) -> i64:
+    mut total: i64 = 0
+    mut i: size = start
+    while i < end:
+        total += values[i]
+        i += 1
+    return total
+
+manual fn count_to(counter: &atomic[i64], n: i64):
+    mut i: i64 = 0
+    while i < n:
+        counter.add(1)
+        i += 1
+
+manual fn main():
+    mut values: vector[i64] = []
+    mut i: i64 = 1
+    while i <= 1000:
+        values.push(i)
+        i += 1
+    const counter: atomic[i64] = atomic(0)
+    mut label: str = "sum"
+    with scope() as s:
+        const low: thread[i64] = s.spawn(part_sum, &values, 0, 500)
+        const high: thread[i64] = s.spawn(part_sum, &values, 500, 1000)
+        s.spawn(count_to, &counter, 1000)
+        s.spawn(count_to, &counter, 1000)
+        s.spawn(lambda [&mut label] () -> size: len(label))
+        print(f"{low.join() + high.join()}")
+    label += "!"
+    print(f"{counter.load()} {label}")
+# expect: 500500
+# expect: 2000 sum!

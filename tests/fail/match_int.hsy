@@ -1,0 +1,6 @@
+manual fn main():
+    const n: i32 = 3
+    match n:
+        case 1:
+            pass
+# error: this `match` does not cover every other value

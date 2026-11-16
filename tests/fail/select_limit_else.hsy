@@ -1,0 +1,13 @@
+import time
+from thread import channel
+
+managed fn main():
+    tx, rx = channel[i64]()
+    select:
+        case rx.receive():
+            pass
+        case time.sleep(1):
+            pass
+        else:
+            pass
+# error: a `select` with `else` does not wait

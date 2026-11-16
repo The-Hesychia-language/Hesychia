@@ -1,0 +1,13 @@
+manual enum Shape:
+    Circle(radius: f64)
+    Square(side: f64)
+    Empty
+
+manual fn main():
+    const s: Shape = Shape.Empty
+    match s:
+        case Shape.Circle(r) | Shape.Square(r):
+            pass
+        case _:
+            pass
+# error: the options of a `|` pattern cannot bind names

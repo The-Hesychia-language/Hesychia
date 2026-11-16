@@ -1,0 +1,39 @@
+from io import print
+
+trait Describe:
+    method describe(&self) -> str:
+        return "something"
+
+manual struct Pair[T: Add](Add, Equal, Describe):
+    a: T
+    b: T
+
+    method make(owned a: T, owned b: T) -> Pair[T]:
+        return Pair(a, b)
+
+    method add(&self, other: &Pair[T]) -> Pair[T]:
+        return Pair(self.a + other.a, self.b + other.b)
+
+    method equal(&self, other: &Pair[T]) -> bool:
+        return self.a == other.a
+
+manual struct Guard[T](Drop):
+    value: T
+
+    method drop(&mut self):
+        print("released")
+
+manual fn main():
+    const p: Pair[i32] = Pair(1, 2) + Pair(10, 20)
+    print(f"{p.a} {p.b}")
+    const s: Pair[str] = Pair.make("x", "y") + Pair.make("1", "2")
+    print(f"{s.a}{s.b}")
+    print(f"{Pair(1, 5) == Pair(1, 9)} {p.describe()}")
+    if True:
+        const _g: Guard[i32] = Guard(3)
+    print("end")
+# expect: 11 22
+# expect: x1y2
+# expect: True something
+# expect: released
+# expect: end

@@ -1,0 +1,7 @@
+manual struct Box:
+    value: i32
+
+manual fn main():
+    const b: Box = Box(1)
+    const part: Box = b[0:1]
+# error: `Box` cannot be sliced

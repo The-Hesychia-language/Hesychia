@@ -1,0 +1,17 @@
+manual struct A:
+    x: i32
+
+manual struct B:
+    y: i32
+
+manual fn f(k: i32) raises A | B:
+    if k == 0:
+        raise A(1)
+    raise B(2)
+
+manual fn main():
+    try:
+        check f(0)
+    except e:
+        raise e.copy()
+# error: a caught error cannot be copied

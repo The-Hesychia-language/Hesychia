@@ -1,0 +1,13 @@
+manual enum Shape:
+    Circle(radius: f64)
+    Square(side: f64)
+    Empty
+
+manual fn main():
+    const s: Shape = Shape.Empty
+    match s:
+        case Shape.Circle(r):
+            pass
+        case Shape.Empty:
+            pass
+# error: this `match` does not cover `Shape.Square`

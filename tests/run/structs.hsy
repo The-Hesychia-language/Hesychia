@@ -1,0 +1,61 @@
+extern fn printf(fmt: ptr[u8], ...) -> i32
+
+manual struct Point:
+    x: i32
+    y: i32
+
+    method origin() -> Point:
+        return Point(0, 0)
+
+    method sum(&self) -> i32:
+        return self.x + self.y
+
+    method shift(&mut self, dx: i32, dy: i32 = 1):
+        self.x += dx
+        self.y += dy
+
+    method into_tuple(owned self) -> (i32, i32):
+        return (self.x, self.y)
+
+manual struct Segment:
+    start: Point
+    end: Point
+    priv tag: u8
+
+manual fn length(s: &Segment) -> i32:
+    return s.end.sum() - s.start.sum()
+
+manual fn grow(s: &mut Segment, by: i32):
+    s.end.shift(by, dy=by)
+
+manual fn bump(n: &mut i32):
+    n += 1
+
+manual fn total(values: &array[i32, 4]) -> i32:
+    mut sum: i32 = 0
+    for i in range(4):
+        sum += values[i]
+    return sum
+
+manual fn main():
+    mut p: Point = Point(y=2, x=1)
+    p.shift(10)
+    printf("%d %d %d\n".to_c(), p.x, p.y, p.sum())
+    mut s: Segment = Segment(Point.origin(), p.copy(), 7)
+    grow(&mut s, 5)
+    printf("%d %u\n".to_c(), length(&s), s.tag)
+    const (a, b): (i32, i32) = p.into_tuple()
+    printf("%d %d\n".to_c(), a, b)
+    mut counter: i32 = 0
+    bump(&mut counter)
+    bump(&mut counter)
+    mut values: array[i32, 4] = [1, 2, 3, 4]
+    values[u8(3)] = 40
+    printf("%d %d\n".to_c(), counter, total(&values))
+    const moved: Segment = s
+    printf("%d\n".to_c(), moved.end.x)
+# expect: 11 3 14
+# expect: 24 7
+# expect: 11 3
+# expect: 2 46
+# expect: 16

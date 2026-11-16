@@ -1,0 +1,6 @@
+managed enum Token:
+    Number(value: i64)
+
+manual fn main():
+    pass
+# error: `managed` enums cannot carry data

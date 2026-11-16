@@ -1,0 +1,6 @@
+manual fn make[N: size]() -> i32:
+    return 1
+
+manual fn main():
+    const x: i32 = make()
+# error: cannot infer `N` in this call to `make`

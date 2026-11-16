@@ -1,0 +1,6 @@
+manual struct V(Printable):
+    x: i32
+
+manual fn main():
+    pass
+# error: unknown trait `Printable`

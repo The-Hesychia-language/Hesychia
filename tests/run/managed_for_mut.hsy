@@ -1,0 +1,21 @@
+from io import print
+
+managed struct Account:
+    owner: str
+    balance: i64
+
+managed fn main():
+    values = [1, 2, 3]
+    for x in values:
+        x *= 10
+    accounts = [Account(owner="ann", balance=5), Account(owner="bob", balance=7)]
+    for a in accounts:
+        a.balance += 100
+    names = ["x", "y"]
+    for n in names:
+        n += "!"
+    total = 0
+    for v in values:
+        total += v
+    print(f"{values} {accounts[1]} {names} {total}")
+# expect: [10, 20, 30] Account(owner='bob', balance=107) ['x!', 'y!'] 60

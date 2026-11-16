@@ -1,0 +1,5 @@
+manual fn main():
+    mut v: vector[i32] = [1, 2]
+    for x in &v:
+        v.push(x)
+# error: this loop changes the vector it iterates

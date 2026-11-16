@@ -1,0 +1,47 @@
+# Workers square numbers from one channel into another; the main thread gathers them.
+from io import print
+import time
+from thread import spawn, channel, atomic
+
+manual fn worker(owned jobs: receiver[i64], owned results: sender[i64]):
+    while True:
+        const job: Optional[i64] = jobs.receive()
+        if job is None:
+            return
+        results.send(job * job)
+
+# Owns the sender, so the channel closes when every job is sent.
+manual fn feed(owned jobs: sender[i64]):
+    for n in range(i64(1), 101):
+        jobs.send(n)
+
+managed fn main():
+    job_tx, job_rx = channel[i64]()
+    out_tx, out_rx = channel[i64]()
+    t = spawn(worker, job_rx, out_tx)
+    feed(job_tx)
+    received = vector[i64]()
+    waiting = True
+    while waiting:
+        select:
+            case value = out_rx.receive():
+                if value is None:
+                    waiting = False
+                else:
+                    received.push(value)
+            case time.sleep(5):
+                print("stuck")
+                waiting = False
+    t.join()
+    print(f"{len(received)} {sum(received)} {received[0]} {received[99]}")
+    evens = atomic(0)
+    parallel for value in received:
+        if value % 2 == 0:
+            evens.add(1)
+    print(f"{evens.load()}")
+    parallel for value in received:
+        value = value % 10
+    print(f"{max(received)} {min(received)}")
+# expect: 100 338350 1 10000
+# expect: 50
+# expect: 9 0

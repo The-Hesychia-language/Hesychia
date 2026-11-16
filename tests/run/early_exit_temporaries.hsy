@@ -1,0 +1,32 @@
+from io import print
+
+manual struct Oops:
+    code: i32
+
+managed fn name(n: i32) -> str:
+    return f"item{n}"
+
+managed fn fail(n: i32) -> str:
+    if n > 1:
+        raise Oops(code=n)
+    return "ok"
+
+managed fn pair(a: str, b: str) -> str:
+    return f"{a}+{b}"
+
+managed fn main():
+    for n in range(3):
+        try:
+            print(f"{name(n)} {fail(n)} {name(n + 10)}")
+            print(pair(name(n), fail(n)))
+            words = [name(n), fail(n)]
+            print(f"{len(words)}")
+        except Oops as e:
+            print(f"failed {e.code}")
+# expect: item0 ok item10
+# expect: item0+ok
+# expect: 2
+# expect: item1 ok item11
+# expect: item1+ok
+# expect: 2
+# expect: failed 2

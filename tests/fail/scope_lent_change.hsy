@@ -1,0 +1,11 @@
+from thread import scope
+
+manual fn count(values: &vector[i32]) -> size:
+    return len(values)
+
+manual fn main():
+    mut values: vector[i32] = []
+    with scope() as s:
+        s.spawn(count, &values)
+        values.push(3)
+# error: this value is lent to a thread until the end of the `scope`

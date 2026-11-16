@@ -1,0 +1,14 @@
+from io import print
+
+managed fn main():
+    v = vector[i32]()
+    for i in range(6):
+        v.push(i)
+    doubled = [x * 2 for x in v]
+    evens = [x for x in v if x % 2 == 0]
+    words = [f"n{x}" for x in range(3)]
+    lengths = [len(w) for w in words]
+    print(f"{len(doubled)} {doubled[5]} {len(evens)} {evens[2]}")
+    print(f"{words[2]} {lengths[0]}")
+# expect: 6 10 3 4
+# expect: n2 2

@@ -1,0 +1,17 @@
+from io import print
+
+managed fn total(values: vector[i32]) -> i64:
+    sum = 0
+    for v in values:
+        sum += v
+    return sum
+
+managed fn main():
+    values = [1, 2, 3]
+    values.push(4)
+    words = ["a", "b"]
+    print(f"{total(values)} {len(values)} {len(words)} {total([5, 6])}")
+    const fixed: array[i32, 2] = [7, 8]
+    print(f"{fixed[1]}")
+# expect: 10 4 2 11
+# expect: 8

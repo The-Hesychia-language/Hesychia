@@ -1,0 +1,5 @@
+comptime fn forever(n: i64) -> i64:
+    return forever(n + 1)
+
+comptime N: i64 = forever(0)
+# error: this `comptime fn` calls itself too deeply

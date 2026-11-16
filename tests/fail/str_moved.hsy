@@ -1,0 +1,10 @@
+from io import print
+
+manual fn take(owned s: str):
+    pass
+
+manual fn main():
+    const s: str = "x"
+    take(s)
+    print(s)
+# error: `s` was moved away on line 8

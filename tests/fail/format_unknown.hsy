@@ -1,0 +1,5 @@
+from io import print
+
+managed fn main():
+    print(f"{3:5q}")
+# error: unknown format `q`: it is one of `d x X b o f e %`

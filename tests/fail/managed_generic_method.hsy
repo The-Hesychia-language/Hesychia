@@ -1,0 +1,9 @@
+managed struct Box:
+    value: i32
+
+    method apply[T](self, x: T) -> i32:
+        return self.value
+
+managed fn main():
+    pass
+# error: a `managed` method cannot have type parameters

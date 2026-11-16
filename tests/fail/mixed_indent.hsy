@@ -1,0 +1,5 @@
+manual fn main():
+    pass
+manual fn other():
+	pass
+# error: mixed tabs and spaces

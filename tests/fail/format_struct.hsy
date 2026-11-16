@@ -1,0 +1,9 @@
+from thread import atomic
+
+manual struct Counter:
+    hits: atomic[i32]
+
+manual fn main():
+    const c: Counter = Counter(hits=atomic(0))
+    const text: str = f"{c}"
+# error: a `Counter` value cannot be written in an f-string

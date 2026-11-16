@@ -1,0 +1,14 @@
+from io import print
+
+@packed
+manual struct Header:
+    tag: u8
+    length: u32
+
+@align(16)
+manual struct Block:
+    value: u8
+
+manual fn main():
+    print(f"{size_of[Header]()} {size_of[Block]()} {align_of[Block]()}")
+# expect: 5 16 16

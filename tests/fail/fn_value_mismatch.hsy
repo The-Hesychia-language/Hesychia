@@ -1,0 +1,6 @@
+manual fn one() -> i32:
+    return 1
+
+manual fn main():
+    const f: fn(i32) -> i32 = one
+# error: expected `fn(i32) -> i32`, found `fn() -> i32`

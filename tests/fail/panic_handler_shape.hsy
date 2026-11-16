@@ -1,0 +1,7 @@
+@panic_handler
+manual fn on_panic(code: i32):
+    pass
+
+manual fn main():
+    pass
+# error: a panic handler is `manual fn name(message: &str)`

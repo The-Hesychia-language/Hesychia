@@ -1,0 +1,24 @@
+from io import print
+
+manual fn doubled(text: &str) -> i64 raises ParseError:
+    return check i64(text) * 2
+
+manual fn take_all(owned words: vector[str], out: &mut vector[str]):
+    for word in words:
+        out.push(word)
+
+managed fn main():
+    print(f"{doubled("21")}")
+    try:
+        print(f"{doubled("2.5")}")
+    except ParseError as e:
+        print(f"not an integer: {e.text}")
+    out = vector[str]()
+    take_all(["a", "b"], out)
+    sum = 0
+    for n in [1, 2, 3]:
+        sum += n
+    print(f"{out} {sum}")
+# expect: 42
+# expect: not an integer: 2.5
+# expect: ['a', 'b'] 6

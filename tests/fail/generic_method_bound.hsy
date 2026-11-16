@@ -1,0 +1,9 @@
+manual struct C:
+    n: i32
+
+    method add[T](&self, x: &T, y: &T) -> T:
+        return x + y
+
+manual fn main():
+    pass
+# error: `+` on `T` needs the bound `Add`

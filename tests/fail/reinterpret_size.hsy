@@ -1,0 +1,4 @@
+manual fn main():
+    const x: f64 = 1.0
+    const y: u32 = u32.reinterpret(x)
+# error: `f64` and `u32` do not have the same size

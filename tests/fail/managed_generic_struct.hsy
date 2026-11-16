@@ -1,0 +1,6 @@
+managed struct Box[T]:
+    value: T
+
+managed fn main():
+    pass
+# error: a `managed` struct cannot have type parameters

@@ -1,0 +1,10 @@
+manual fn make[R]() -> i32:
+    comptime if R == dict:
+        const x: R = 1
+        return x
+    else:
+        return 0
+
+managed fn main():
+    n = make[dict]()
+# error: `R` is `dict`, which needs its type arguments here

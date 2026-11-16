@@ -1,0 +1,10 @@
+manual struct Plain:
+    x: i32
+
+manual enum Tree[T: Order]:
+    Leaf
+    Node(item: T)
+
+manual fn main():
+    const t: Tree[Plain] = Tree.Leaf
+# error: `Plain` does not implement `Order`, required by `T` of `Tree`

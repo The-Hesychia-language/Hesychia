@@ -1,0 +1,51 @@
+from io import print
+
+manual struct Pair[T]:
+    first: T
+    second: T
+
+    method swap(owned self) -> Pair[T]:
+        return Pair(self.second, self.first)
+
+manual struct Stack[T]:
+    items: vector[T]
+
+    method push(&mut self, owned item: T):
+        self.items.push(item)
+
+    method pop(&mut self) -> Optional[T]:
+        return self.items.pop()
+
+    method size(&self) -> size:
+        return len(self.items)
+
+manual struct Node[T]:
+    value: T
+    next: Optional[heap[Node[T]]]
+
+manual fn sum_pair[T: Add](pair: &Pair[T]) -> T:
+    return pair.first + pair.second
+
+manual fn main():
+    const p: Pair[i32] = Pair(1, 2).swap()
+    print(f"{p.first} {p.second}")
+    const words: Pair[str] = Pair[str]("left", "right")
+    print(f"{words.second}")
+    mut stack: Stack[str] = Stack([])
+    stack.push("a")
+    stack.push(f"b{stack.size()}")
+    const top: Optional[str] = stack.pop()
+    if top is not None:
+        print(f"{top} {stack.size()}")
+    const list: Node[i64] = Node(1, allocate(Node(2, None)))
+    if list.next is not None:
+        print(f"{list.next.value}")
+    const numbers: Pair[i64] = Pair(3, 4)
+    print(f"{sum_pair(&numbers)}")
+    print(f"{Pair(1, 2) == Pair(1, 2)}")
+# expect: 2 1
+# expect: right
+# expect: b1 1
+# expect: 2
+# expect: 7
+# expect: True

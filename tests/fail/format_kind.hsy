@@ -1,0 +1,6 @@
+from io import print
+
+managed fn main():
+    name = "Ada"
+    print(f"{name:.2f}")
+# error: the format `f` writes a number, not a `str`

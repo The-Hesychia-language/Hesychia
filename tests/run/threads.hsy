@@ -1,0 +1,27 @@
+from io import print
+from thread import spawn
+
+manual fn square_sum(n: i64) -> i64:
+    mut total: i64 = 0
+    mut i: i64 = 1
+    while i <= n:
+        total += i * i
+        i += 1
+    return total
+
+manual fn shout(owned words: vector[str]) -> str:
+    mut out: str = ""
+    for w in &words:
+        out += w
+    return out
+
+manual fn main():
+    const a: thread[i64] = spawn(square_sum, 10)
+    const b: thread[i64] = spawn(square_sum, 100)
+    mut words: vector[str] = []
+    words.push("hes")
+    words.push("ychia")
+    const c: thread[str] = spawn(shout, words)
+    print(f"{a.join()} {b.join()} {c.join()}")
+    const _forgotten: thread[i64] = spawn(square_sum, 3)
+# expect: 385 338350 hesychia

@@ -1,0 +1,35 @@
+from io import print
+
+manual fn each(values: &vector[i32], f: &fn(i32)):
+    for i in range(len(values)):
+        f(values[i])
+
+manual fn twice(f: &fn(i32) -> i32, x: i32) -> i32:
+    return f(f(x))
+
+manual fn relay(values: &vector[i32], f: &fn(i32)):
+    each(values, f)
+
+manual fn add_one(x: i32) -> i32:
+    return x + 1
+
+manual fn main():
+    const values: vector[i32] = [1, 2, 3]
+    mut doubled: vector[i32] = []
+    each(&values, lambda [&mut doubled] (x: i32): doubled.push(x * 2))
+    print(f"doubled {len(doubled)} {doubled[2]}")
+    const prefix: str = "item"
+    each(&values, lambda [&prefix] (x: i32): print(f"{prefix} {x}"))
+    const step: i32 = 10
+    print(f"{twice(lambda [&step] (x: i32) -> i32: x + step, 1)}")
+    print(f"{twice(add_one, 5)} {twice(lambda (x: i32) -> i32: x * 3, 2)}")
+    mut seen: vector[str] = []
+    relay(&values, lambda [&mut seen, &prefix] (x: i32): seen.push(f"{prefix}{x}"))
+    print(f"seen {len(seen)} {seen[0]}")
+# expect: doubled 3 6
+# expect: item 1
+# expect: item 2
+# expect: item 3
+# expect: 21
+# expect: 7 18
+# expect: seen 3 item1

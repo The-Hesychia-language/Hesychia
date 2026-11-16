@@ -1,0 +1,6 @@
+manual struct File(Drop):
+    fd: i32
+
+    method drop(&mut slf):
+        pass
+# error: expected a name, found `&`

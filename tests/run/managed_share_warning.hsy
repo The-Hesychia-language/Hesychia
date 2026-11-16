@@ -1,0 +1,12 @@
+from io import print
+
+managed struct Person:
+    name: str
+
+managed fn main():
+    bob = Person(name="bob")
+    team = vector[Person]()
+    team.push(bob)
+    bob.name = "robert"
+    print(f"{team[0].name} {bob.name}")
+# expect: bob robert

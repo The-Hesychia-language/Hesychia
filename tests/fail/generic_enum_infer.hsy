@@ -1,0 +1,10 @@
+manual enum Maybe[T]:
+    Just(value: T)
+    Nothing
+
+manual fn main():
+    const n: i32 = 0
+    match Maybe.Nothing:
+        case _:
+            pass
+# error: cannot infer `T` in `Maybe.Nothing`

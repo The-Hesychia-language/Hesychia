@@ -1,0 +1,37 @@
+from io import print
+
+manual struct NotFound:
+    path: str
+
+manual struct Denied:
+    user: str
+
+manual enum Disk:
+    Full
+    Gone
+
+manual fn open(n: i32) -> i32 raises NotFound | Denied | Disk:
+    if n == 1:
+        raise NotFound(path="/etc")
+    if n == 2:
+        raise Denied(user="bob")
+    if n == 3:
+        raise Disk.Full
+    return n
+
+manual fn describe(n: i32) -> str:
+    try:
+        check open(n)
+        return "opened"
+    except e:
+        match e:
+            case NotFound as missing:
+                return f"missing {missing.path}"
+            case Denied as d:
+                return f"denied to {d.user}"
+            case Disk:
+                return "disk"
+
+manual fn main():
+    print(f"{describe(0)} {describe(1)} {describe(2)} {describe(3)}")
+# expect: opened missing /etc denied to bob disk

@@ -1,0 +1,11 @@
+from thread import scope
+
+manual fn grow(values: &mut vector[i32]):
+    values.push(1)
+
+manual fn main():
+    mut values: vector[i32] = []
+    with scope() as s:
+        s.spawn(grow, &mut values)
+        s.spawn(grow, &mut values)
+# error: is lent to a thread

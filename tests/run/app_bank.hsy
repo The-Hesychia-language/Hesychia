@@ -1,0 +1,50 @@
+# Accounts, transfers that can fail, and a report: managed code over manual types.
+from io import print
+import json
+from json import Value
+
+manual struct Refused:
+    reason: str
+
+manual struct Account:
+    owner: str
+    balance: i64
+
+    method withdraw(&mut self, amount: i64) raises Refused:
+        if amount <= 0:
+            raise Refused(reason="the amount must be positive")
+        if amount > self.balance:
+            raise Refused(reason=f"{self.owner} has {self.balance}, not {amount}")
+        self.balance -= amount
+
+managed fn transfer(accounts: vector[Account], source: i32, target: i32, amount: i64):
+    accounts[source].withdraw(amount)
+    accounts[target].balance += amount
+
+managed fn report(accounts: vector[Account]) -> str:
+    lines = [f"{a.owner}={a.balance}" for a in accounts]
+    return ", ".join(lines)
+
+managed fn main():
+    accounts = [Account("ana", 100), Account("bob", 20)]
+    moves = [(0, 1, 30), (1, 0, 500), (1, 0, -1), (1, 0, 50)]
+    refused = 0
+    for source, target, amount in moves:
+        try:
+            transfer(accounts, source, target, amount)
+        except Refused as e:
+            refused += 1
+            print(f"refused: {e.reason}")
+    print(f"{report(accounts)} ({refused} refused)")
+    total = sum([a.balance for a in accounts])
+    richest = max([a.balance for a in accounts])
+    print(f"{total} {richest}")
+    fields = dict[str, Value]()
+    fields["total"] = Value.Number(f64(total))
+    fields["owners"] = Value.List([Value.Text(a.owner) for a in accounts])
+    json.dump(Value.Object(fields))
+# expect: refused: bob has 50, not 500
+# expect: refused: the amount must be positive
+# expect: ana=120, bob=0 (2 refused)
+# expect: 120 120
+# expect: {"total":120,"owners":["ana","bob"]}

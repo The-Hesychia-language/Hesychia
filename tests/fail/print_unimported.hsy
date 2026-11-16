@@ -1,0 +1,3 @@
+manual fn main():
+    print("hi")
+# error: import it with `from io import print`

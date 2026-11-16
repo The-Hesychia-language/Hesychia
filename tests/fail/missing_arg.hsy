@@ -1,0 +1,9 @@
+manual struct Box:
+    value: i32
+
+manual fn add(a: i32, b: i32) -> i32:
+    return a + b
+
+manual fn main():
+    const x: i32 = add(1)
+# error: missing argument `b` for `add`

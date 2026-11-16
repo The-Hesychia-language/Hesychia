@@ -1,0 +1,9 @@
+manual struct P:
+    x: i32
+
+manual fn add[T: Add](a: &T, b: &T) -> T:
+    return a + b
+
+manual fn main():
+    const p: P = add(&P(1), &P(2))
+# error: `P` does not implement `Add`, required by `T` of `add`

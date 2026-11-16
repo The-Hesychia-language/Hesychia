@@ -1,0 +1,67 @@
+from io import print
+
+manual enum Shape:
+    Named(label: str, sides: i32)
+    Blank
+
+manual fn first_long(words: &vector[str]) -> Optional[str]:
+    for i in range(len(words)):
+        const word: str = words[i].copy()
+        if len(word) > 3:
+            return word
+    return None
+
+manual fn label(owned s: Shape) -> str:
+    match s:
+        case Shape.Named(text, _):
+            return text
+        case _:
+            return "blank"
+
+manual fn main():
+    mut grid: vector[vector[str]] = []
+    for row in range(3):
+        mut line: vector[str] = []
+        for col in range(3):
+            const cell: str = f"{row}:{col}"
+            if col == 1:
+                continue
+            line.push(cell)
+        grid.push(line)
+    print(f"{len(grid)} {len(grid[2])} {grid[2][1]}")
+    mut words: vector[str] = ["a", "tree", "house"]
+    const found: Optional[str] = first_long(&words)
+    if found is not None:
+        print(found)
+    mut name: str = "first"
+    name = f"{name} second"
+    name = name + " third"
+    print(name)
+    const keep: str = "kept"
+    mut index: i32 = 0
+    while True:
+        const temp: str = f"round {index}"
+        index += 1
+        if index == 3:
+            print(temp)
+            break
+    if index > 0:
+        const gone: str = keep
+        print(gone)
+    print(label(Shape.Named("tri", 3)))
+    print(label(Shape.Blank))
+    words.remove(0)
+    const shape: Shape = Shape.Named(words.remove(0), 4)
+    match shape:
+        case Shape.Named(text, sides):
+            print(f"{text} {sides}")
+        case Shape.Blank:
+            pass
+# expect: 3 2 2:2
+# expect: tree
+# expect: first second third
+# expect: round 2
+# expect: kept
+# expect: tri
+# expect: blank
+# expect: tree 4

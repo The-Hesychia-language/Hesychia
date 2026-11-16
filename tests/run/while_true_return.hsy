@@ -1,0 +1,21 @@
+from io import print
+
+manual fn first_over(v: &vector[i32], limit: i32) -> i32:
+    mut i: size = 0
+    while True:
+        if i == len(v):
+            return -1
+        if v[i] > limit:
+            return v[i]
+        i += 1
+
+managed fn count_to(n: i32) -> i32:
+    i = 0
+    while True:
+        i += 1
+        if i >= n:
+            return i
+
+managed fn main():
+    print(f"{first_over([1, 5, 9], 4)} {first_over([1], 4)} {count_to(7)}")
+# expect: 5 -1 7

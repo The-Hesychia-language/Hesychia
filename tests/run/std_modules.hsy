@@ -1,0 +1,34 @@
+from io import print
+import math
+import time
+import os
+import random
+
+managed fn main():
+    print(f"{math.sqrt(16.0)} {2.0 ** 10.0} {math.floor(-1.5)} {math.round(2.5)} {math.pi} {math.inf} {math.is_nan(math.nan)}")
+    print(f"{math.abs(-3)} {math.abs(2.5)} {math.log(100.0, base=10.0)} {math.log(math.e)}")
+    start = time.now()
+    time.sleep(20, unit=time.ms)
+    waited = time.elapsed(start)
+    print(f"{waited >= 0.02} {waited < 1.0} {time.elapsed(start, unit=time.ms) >= 20.0} {time.timestamp() > 1700000000.0}")
+    print(f"{time.date(0.0)} {time.date(1763251560.0)} {time.date(951782400.0).day} {time.date().year >= 2026}")
+    words = os.args()
+    print(f"{len(words)} {os.env("PATH") is not None} {os.env("HSY_NOPE")} {len(os.cwd()) > 0}")
+    random.seed(42)
+    a = random.int(1, 6)
+    b = random.float()
+    c = random.float(10.0, 20.0)
+    random.seed(42)
+    print(f"{a == random.int(1, 6)} {a >= 1 and a <= 6} {b >= 0.0 and b < 1.0} {c >= 10.0 and c < 20.0}")
+    cards = [1, 2, 3, 4, 5]
+    random.shuffle(cards)
+    pick = random.item(cards)
+    cards.sort()
+    print(f"{cards} {pick in cards}")
+# expect: 4.0 1024.0 -2.0 3.0 3.141592653589793 inf True
+# expect: 3 2.5 2.0 1.0
+# expect: True True True True
+# expect: 1970/01/01 00:00:00 2025/11/16 00:06:00 29 True
+# expect: 1 True None True
+# expect: True True True True
+# expect: [1, 2, 3, 4, 5] True

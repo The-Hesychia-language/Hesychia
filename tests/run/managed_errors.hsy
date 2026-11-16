@@ -1,0 +1,35 @@
+from io import print
+
+manual struct TooBig:
+    value: i32
+
+manual struct Negative:
+    value: i32
+
+managed fn validate(n: i32) -> i32:
+    if n > 100:
+        raise TooBig(value=n)
+    if n < 0:
+        raise Negative(value=n)
+    return n
+
+managed fn double(n: i32) -> i32:
+    return validate(n) * 2
+
+managed fn report(n: i32) -> str:
+    try:
+        return f"{double(n)}"
+    except TooBig as e:
+        return f"too big: {e.value}"
+    except _e:
+        return "something else"
+
+managed fn main():
+    print(report(5))
+    print(report(500))
+    print(report(-1))
+    print(f"{double(7)}")
+# expect: 10
+# expect: too big: 500
+# expect: something else
+# expect: 14

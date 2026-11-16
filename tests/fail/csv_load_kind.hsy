@@ -1,0 +1,7 @@
+import csv
+import fs
+
+managed fn main():
+    f = fs.open("x.csv")
+    rows = csv.load[i32](f)
+# error: csv: load each row as a `vector` or a `dict`

@@ -1,0 +1,35 @@
+from io import print
+
+manual fn each(values: &vector[i32], f: &fn(i32)):
+    for i in range(len(values)):
+        f(values[i])
+
+manual fn apply(f: fn(i32) -> i32, x: i32) -> i32:
+    return f(x)
+
+manual fn main():
+    manual fn square(x: i32) -> i32:
+        return x * x
+
+    manual fn factorial(n: u64) -> u64:
+        if n <= 1:
+            return 1
+        return n * factorial(n - 1)
+
+    print(f"{square(4)} {apply(square, 5)} {factorial(10)}")
+    mut lines: vector[str] = []
+    const prefix: str = "#"
+
+    manual fn record[&mut lines, &prefix](x: i32):
+        const text: str = f"{prefix}{x}"
+        if x > 2:
+            lines.push(f"{text} big")
+            return
+        lines.push(text)
+
+    record(1)
+    const more: vector[i32] = [2, 3]
+    each(&more, record)
+    print(f"{len(lines)} {lines[0]} {lines[2]}")
+# expect: 16 25 3628800
+# expect: 3 #1 #3 big

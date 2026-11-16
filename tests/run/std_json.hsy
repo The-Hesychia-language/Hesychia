@@ -1,0 +1,57 @@
+import io
+from io import print
+import fs
+import json
+from json import Value
+
+managed fn write(path: str, text: str):
+    f = fs.open(path, fs.Mode.Write)
+    print(text, end="", to=f)
+
+managed fn load(text: str) -> Value:
+    write("hsy-json-test.json", text)
+    f = fs.open("hsy-json-test.json")
+    return json.load(f)
+
+managed fn main():
+    v = load(" {\"name\": \"Ana\", \"tags\": [1, 2.5, true, null], \"esc\": \"a\\\"b\\u00e9\\ud83d\\ude00\\n\", \"empty\": {}} ")
+    json.dump(v)
+    json.dump(v, indent=2)
+    match v:
+        case Value.Object(fields):
+            print(f"{fields.keys()} {len(fields)}")
+            match fields["name"]:
+                case Value.Text(name):
+                    print(f"name {name}")
+                case _:
+                    print("?")
+        case _:
+            print("not an object")
+    for bad in ["[1,", "{\"a\" 1}", "tru", "\"x", "1 2", "01", ""]:
+        try:
+            load(bad)
+            print("accepted")
+        except JsonError as e:
+            print(f"{e.at}: {e.reason}")
+    fs.remove("hsy-json-test.json")
+# expect: {"name":"Ana","tags":[1,2.5,true,null],"esc":"a\"bé😀\n","empty":{}}
+# expect: {
+# expect:   "name": "Ana",
+# expect:   "tags": [
+# expect:     1,
+# expect:     2.5,
+# expect:     true,
+# expect:     null
+# expect:   ],
+# expect:   "esc": "a\"bé😀\n",
+# expect:   "empty": {}
+# expect: }
+# expect: ['name', 'tags', 'esc', 'empty'] 4
+# expect: name Ana
+# expect: 3: expected a value
+# expect: 5: expected `:`
+# expect: 0: expected `true`
+# expect: 2: a string is not closed
+# expect: 2: text after the value
+# expect: 1: text after the value
+# expect: 0: expected a value

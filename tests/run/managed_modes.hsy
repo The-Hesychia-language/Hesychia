@@ -1,0 +1,52 @@
+from io import print
+
+managed struct Bag:
+    items: vector[i32]
+
+managed fn total(v: vector[i32]) -> i64:
+    sum = 0
+    for i in range(len(v)):
+        sum += v[i]
+    return sum
+
+managed fn add_one(v: vector[i32]):
+    v.push(1)
+
+managed fn fill(v: vector[i32], n: i32):
+    i = 0
+    while i < n:
+        add_one(v)
+        i += 1
+
+managed fn keep(v: vector[i32]) -> Bag:
+    return Bag(items=v)
+
+managed fn greet(name: str) -> str:
+    return f"hello {name}"
+
+# `a` and `b` call each other: `b` pushes, so both end up `&mut`.
+managed fn a(v: vector[i32], n: i32):
+    if n > 0:
+        b(v, n - 1)
+
+managed fn b(v: vector[i32], n: i32):
+    v.push(n)
+    a(v, n)
+
+managed fn main():
+    v = vector[i32]()
+    fill(v, 3)
+    print(f"{total(v)} {len(v)}")
+    bag = keep(v)
+    print(f"{len(bag.items)} {greet("bob")}")
+    who = "ann"
+    print(greet(who))
+    print(who)
+    w = vector[i32]()
+    a(w, 3)
+    print(f"{len(w)} {total(w)}")
+# expect: 3 3
+# expect: 3 hello bob
+# expect: hello ann
+# expect: ann
+# expect: 3 3

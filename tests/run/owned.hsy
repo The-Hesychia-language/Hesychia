@@ -1,0 +1,71 @@
+import io
+from io import print
+
+manual struct Person:
+    name: str
+    age: i32
+
+    method greet(&self) -> str:
+        return f"Hi {self.name}, {self.age} years"
+
+manual struct Node:
+    value: i32
+    next: Optional[heap[Node]]
+
+manual enum Message:
+    Text(body: str)
+    Quit
+
+manual fn total(values: &vector[i64]) -> i64:
+    mut sum: i64 = 0
+    for i in range(len(values)):
+        sum += values[i]
+    return sum
+
+manual fn shout(owned text: str) -> str:
+    return text + "!"
+
+manual fn describe(owned m: Message) -> str:
+    match m:
+        case Message.Text(body):
+            return body
+        case Message.Quit:
+            return "quit"
+
+manual fn main():
+    mut people: vector[Person] = []
+    people.push(Person("Ada", 36))
+    people.push(Person(name="Linus", age=54))
+    for i in range(len(people)):
+        print(people[i].greet())
+    const last: Optional[Person] = people.pop()
+    if last is not None:
+        print(f"popped {last.name}")
+    mut numbers: vector[i64] = [1, 2, 3]
+    numbers.insert(0, 10)
+    const removed: i64 = numbers.remove(1)
+    print(f"{len(numbers)} {total(&numbers)} {removed}")
+    mut text: str = "abc"
+    text += "def"
+    const copy: str = text.copy()
+    print(shout(text))
+    print(f"{copy == "abcdef"} {len(copy)} {1.5} {2.0} {-7} {'é'} {True}")
+    const box: heap[Person] = allocate(Person("Grace", 85))
+    print(box.name)
+    print(describe(Message.Text("hello")))
+    print(describe(Message.Quit))
+    numbers.clear()
+    print(f"{len(numbers)}")
+    const accents: str = "été"
+    io.print(f"{len(accents)} {len("naïf")} {byte_len(accents)} {byte_len("naïf")}")
+# expect: Hi Ada, 36 years
+# expect: Hi Linus, 54 years
+# expect: popped Linus
+# expect: 3 15 1
+# expect: abcdef!
+# expect: True 6 1.5 2.0 -7 é True
+# expect: Grace
+# expect: hello
+# expect: quit
+# expect: 0
+# expect: 3 4 5 5

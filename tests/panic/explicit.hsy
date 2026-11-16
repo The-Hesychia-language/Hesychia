@@ -1,0 +1,7 @@
+manual fn pick(n: i32) -> i32:
+    if n > 0:
+        return n
+    panic(f"bad value {n}")
+
+manual fn main() -> i32:
+    return pick(-1)

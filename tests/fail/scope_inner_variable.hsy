@@ -1,0 +1,10 @@
+from thread import scope
+
+manual fn count(values: &vector[i32]) -> size:
+    return len(values)
+
+manual fn main():
+    with scope() as s:
+        const values: vector[i32] = [1]
+        s.spawn(count, &values)
+# error: is declared inside the `with` block

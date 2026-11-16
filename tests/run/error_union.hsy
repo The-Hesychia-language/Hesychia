@@ -1,0 +1,50 @@
+from io import print
+
+manual struct IoError:
+    path: str
+
+manual enum ParseError:
+    Empty
+    Bad(text: str)
+
+manual fn load(kind: i32) -> i32 raises IoError | ParseError:
+    if kind == 0:
+        raise IoError("app.toml")
+    if kind == 1:
+        raise ParseError.Bad("x = ?")
+    if kind == 2:
+        raise ParseError.Empty
+    return 42
+
+manual fn quiet(kind: i32) -> i32:
+    try:
+        return check load(kind)
+    except _e:
+        return -1
+
+manual fn relay(kind: i32) -> i32 raises IoError | ParseError:
+    try:
+        return check load(kind)
+    except e:
+        print("relaying")
+        raise e
+
+manual fn main():
+    print(f"{quiet(0)} {quiet(1)} {quiet(3)}")
+    for kind in range(4):
+        try:
+            print(f"{check relay(kind)}")
+        except IoError as io:
+            print(f"io {io.path}")
+        except ParseError.Bad(text):
+            print(f"bad {text}")
+        except ParseError.Empty:
+            print("empty")
+# expect: -1 -1 42
+# expect: relaying
+# expect: io app.toml
+# expect: relaying
+# expect: bad x = ?
+# expect: relaying
+# expect: empty
+# expect: 42

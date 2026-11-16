@@ -1,0 +1,62 @@
+# A binary search tree kept in a vector, nodes pointing to each other by position.
+from io import print
+
+manual struct Node[T]:
+    item: T
+    left: Optional[size]
+    right: Optional[size]
+
+manual struct Tree[T: Order]:
+    nodes: vector[Node[T]]
+
+    method insert(&mut self, owned item: T):
+        if len(self.nodes) == 0:
+            self.nodes.push(Node(item=item, left=None, right=None))
+            return
+        mut at: size = 0
+        while True:
+            const goes_left: bool = item < self.nodes[at].item
+            const next: Optional[size] = if_left(goes_left, self.nodes[at].left, self.nodes[at].right)
+            if next is not None:
+                at = next
+                continue
+            const new: size = len(self.nodes)
+            if goes_left:
+                self.nodes[at].left = new
+            else:
+                self.nodes[at].right = new
+            self.nodes.push(Node(item=item, left=None, right=None))
+            return
+
+    method walk(&self, at: Optional[size], out: &mut vector[T]):
+        if at is None:
+            return
+        self.walk(self.nodes[at].left, out)
+        out.push(self.nodes[at].item.copy())
+        self.walk(self.nodes[at].right, out)
+
+    method depth(&self, at: Optional[size]) -> i64:
+        if at is None:
+            return 0
+        return 1 + max(&self.depth(self.nodes[at].left), self.depth(self.nodes[at].right))
+
+manual fn if_left(left: bool, a: Optional[size], b: Optional[size]) -> Optional[size]:
+    if left:
+        return a
+    return b
+
+manual fn main():
+    mut numbers: Tree[i64] = Tree(nodes=[])
+    for n in [i64(5), 2, 8, 1, 9, 3]:
+        numbers.insert(n)
+    mut sorted: vector[i64] = []
+    numbers.walk(0, &mut sorted)
+    print(f"{sorted} depth {numbers.depth(0)}")
+    mut words: Tree[str] = Tree(nodes=[])
+    for w in ["pear", "apple", "fig", "kiwi"]:
+        words.insert(w)
+    mut ordered: vector[str] = []
+    words.walk(0, &mut ordered)
+    print(f"{ordered} depth {words.depth(0)}")
+# expect: [1, 2, 3, 5, 8, 9] depth 3
+# expect: ['apple', 'fig', 'kiwi', 'pear'] depth 4

@@ -1,0 +1,9 @@
+manual fn f(n: i32) -> i32:
+    while True:
+        if n > 0:
+            break
+        return 1
+
+manual fn main():
+    pass
+# error: function `f` can end without returning a value

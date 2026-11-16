@@ -1,0 +1,9 @@
+import lib.util
+
+comptime SCALE: i64 = 10
+
+manual fn scaled(x: i64) -> i64:
+    return util.twice(x) * SCALE
+
+priv manual fn hidden() -> i32:
+    return 1

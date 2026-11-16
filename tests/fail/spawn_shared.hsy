@@ -1,0 +1,9 @@
+from thread import spawn
+
+managed fn read(owned box: shared[i32]) -> i32:
+    return 1
+
+managed fn main():
+    box = shared(5)
+    t = spawn(read, box)
+# error: holds a `shared` value, which stays in one thread

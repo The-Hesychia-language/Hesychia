@@ -1,0 +1,9 @@
+from io import print
+
+manual fn main():
+    const a: f64 = 10.0
+    const b: f32 = 0.1
+    const c: f64 = 1e16
+    const d: f64 = 0.00001
+    print(f"{a} {b} {c} {d} {123456.0} {-2.5e-10}")
+# expect: 10.0 0.1 1e+16 1e-05 123456.0 -2.5e-10

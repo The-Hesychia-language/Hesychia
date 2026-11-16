@@ -1,0 +1,6 @@
+manual struct Card:
+    rank: i32
+
+manual fn main():
+    const low: bool = Card(1) < Card(2)
+# error: `Card` does not implement `Order`

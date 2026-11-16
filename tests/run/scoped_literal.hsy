@@ -1,0 +1,14 @@
+from io import print
+from thread import scope
+
+manual fn show(name: &str, n: &i32):
+    print(f"{name} {n}")
+
+managed fn main():
+    with scope() as s:
+        s.spawn(show, "a", 1)
+    x = "bb"
+    with scope() as s:
+        s.spawn(show, x, 7)
+# expect: a 1
+# expect: bb 7

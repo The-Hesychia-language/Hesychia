@@ -1,0 +1,6 @@
+manual struct Pair[T: Add]:
+    a: T
+
+manual fn main():
+    const p: Pair[bool] = Pair(True)
+# error: `bool` does not implement `Add`, required by `T` of `Pair`

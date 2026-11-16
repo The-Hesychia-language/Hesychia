@@ -1,0 +1,37 @@
+from io import print
+
+manual fn total(scores: &dict[str, i32]) -> i32:
+    mut sum: i32 = 0
+    for _name, score in scores.items():
+        sum += score
+    return sum
+
+managed fn main():
+    ages = dict[str, i32]()
+    ages["ana"] = 31
+    ages["bob"] = 25
+    ages["ana"] += 1
+    for i in range(20):
+        ages[f"p{i}"] = i
+    print(f"{ages["ana"]} {ages["bob"]} {len(ages)} {"bob" in ages} {"eve" in ages} {ages.get("eve")} {ages.get("p7")}")
+    print(f"{ages.remove("p3")} {ages.remove("zz")} {len(ages)} {ages["p19"]} {ages.keys()[:3]} {total(ages)}")
+    for name, age in ages.items():
+        if age > 30:
+            print(f"{name} {age}")
+    lists = dict[i64, vector[str]]()
+    lists[1] = []
+    lists[1].push("x")
+    lists[1].push("y")
+    print(f"{lists[1]} {lists.values()}")
+    seen = set[str]()
+    for word in "a b a c b".split():
+        seen.add(word)
+    other = set[str]()
+    other.add("c")
+    other.add("d")
+    print(f"{len(seen)} {"a" in seen} {seen.values()} {seen.union(other).values()} {seen.intersection(other).values()} {seen.remove("a")} {len(seen)}")
+# expect: 32 25 22 True False None 7
+# expect: 3 None 21 19 ['ana', 'bob', 'p0'] 244
+# expect: ana 32
+# expect: ['x', 'y'] [['x', 'y']]
+# expect: 3 True ['a', 'b', 'c'] ['a', 'b', 'c', 'd'] ['c'] True 2

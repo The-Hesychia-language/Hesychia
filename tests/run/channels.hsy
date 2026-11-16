@@ -1,0 +1,28 @@
+from io import print
+from thread import spawn, channel
+
+manual fn produce(owned tx: sender[str], first: i32):
+    mut i: i32 = first
+    while i < first + 3:
+        tx.send(f"message {i}")
+        i += 1
+
+manual fn main():
+    const (tx, rx): (sender[str], receiver[str]) = channel[str]()
+    const other: sender[str] = tx.copy()
+    const a: thread = spawn(produce, tx, 0)
+    a.join()
+    const b: thread = spawn(produce, other, 10)
+    mut count: i32 = 0
+    mut last: str = ""
+    mut open: bool = True
+    while open:
+        const message: Optional[str] = rx.receive()
+        if message is not None:
+            count += 1
+            last = message
+        else:
+            open = False
+    b.join()
+    print(f"{count} {last}")
+# expect: 6 message 12

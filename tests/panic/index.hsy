@@ -1,0 +1,6 @@
+manual fn pick(values: &array[i32, 3], i: i64) -> i32:
+    return values[i]
+
+manual fn main() -> i32:
+    const values: array[i32, 3] = [1, 2, 3]
+    return pick(&values, 3)

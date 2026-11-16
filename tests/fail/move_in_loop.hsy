@@ -1,0 +1,11 @@
+manual struct Box:
+    value: i32
+
+manual fn take(owned b: Box):
+    pass
+
+manual fn main():
+    const a: Box = Box(1)
+    for i in range(3):
+        take(a)
+# error: `a` would be moved again on the next iteration

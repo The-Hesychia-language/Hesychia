@@ -1,0 +1,12 @@
+manual struct Box:
+    value: i32
+
+manual fn take(owned b: Box):
+    pass
+
+manual fn main():
+    const a: Box = Box(1)
+    if True:
+        take(a)
+    take(a)
+# error: `a` was moved away on line 10

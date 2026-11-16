@@ -1,0 +1,30 @@
+from io import print
+
+managed struct Counter:
+    name: str
+    hits: vector[i32]
+
+    method record(self, n: i32):
+        self.hits.push(n)
+
+    method total(self) -> i64:
+        sum = 0
+        for i in range(len(self.hits)):
+            sum += self.hits[i]
+        return sum
+
+    method label(self) -> str:
+        return f"{self.name}: {self.total()}"
+
+    method into_hits(self) -> vector[i32]:
+        return self.hits
+
+managed fn main():
+    c = Counter(name="clicks", hits=vector[i32]())
+    c.record(3)
+    c.record(4)
+    print(c.label())
+    hits = c.into_hits()
+    print(f"{len(hits)}")
+# expect: clicks: 7
+# expect: 2

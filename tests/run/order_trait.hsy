@@ -1,0 +1,21 @@
+from io import print
+
+manual struct Version(Order):
+    major: i32
+    minor: i32
+
+    method compare(&self, other: &Version) -> i32:
+        if self.major != other.major:
+            return self.major - other.major
+        return self.minor - other.minor
+
+manual fn smallest[T: Order](owned a: T, owned b: T) -> T:
+    if b < a:
+        return b
+    return a
+
+managed fn main():
+    print(f"{"apple" < "banana"} {"b" > "abc"} {"ab" <= "ab"} {Version(major=1, minor=2) < Version(major=1, minor=10)}")
+    print(f"{smallest(3, 2)} {smallest("x", "w")} {smallest(Version(major=2, minor=0), Version(major=1, minor=9)).major}")
+# expect: True True True True
+# expect: 2 w 1

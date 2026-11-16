@@ -1,0 +1,2 @@
+comptime HALF: size = LOCK // 2
+# error: `LOCK` is not a compile-time constant

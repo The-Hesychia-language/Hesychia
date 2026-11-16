@@ -1,0 +1,35 @@
+from io import print
+from thread import atomic
+
+manual fn square_all(v: &mut vector[i32]):
+    parallel for x in &mut v:
+        x *= x
+
+managed fn main():
+    v = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    total = atomic(0)
+    parallel for x in v:
+        total.add(x)
+    print(f"{total.load()}")
+    hits = atomic(0)
+    parallel for i in range(0, 1000, 3):
+        if i % 2 == 0:
+            continue
+        hits.add(1)
+    print(f"{hits.load()}")
+    parallel for x in v:
+        x += 100
+    print(f"{v}")
+    w = [1, 2, 3]
+    square_all(w)
+    print(f"{w}")
+    names = ["a", "bb", "ccc"]
+    sizes = atomic(0)
+    parallel for name in names:
+        sizes.add(len(name))
+    print(f"{sizes.load()}")
+# expect: 55
+# expect: 167
+# expect: [101, 102, 103, 104, 105, 106, 107, 108, 109, 110]
+# expect: [1, 4, 9]
+# expect: 6

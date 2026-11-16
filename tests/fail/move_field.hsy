@@ -1,0 +1,11 @@
+manual struct Box:
+    value: i32
+
+manual struct Pair:
+    left: Box
+    right: Box
+
+manual fn main():
+    const p: Pair = Pair(Box(1), Box(2))
+    const b: Box = p.left
+# error: cannot move `p.left` out of its owner

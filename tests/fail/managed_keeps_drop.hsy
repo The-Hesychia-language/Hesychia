@@ -1,0 +1,18 @@
+manual struct File(Drop):
+    fd: i32
+
+    method drop(&mut self):
+        pass
+
+managed struct Archive:
+    files: vector[File]
+
+managed fn store(archive: Archive, file: File):
+    archive.files.push(file)
+
+managed fn main():
+    archive = Archive(files=vector[File]())
+    f = File(fd=3)
+    store(archive, f)
+    store(archive, f)
+# error: `store` takes ownership of it: it keeps the value on line 11 of its module

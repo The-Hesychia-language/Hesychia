@@ -1,0 +1,6 @@
+manual struct V:
+    x: i32
+
+manual fn main():
+    const v: V = V(1) + V(2)
+# error: `V` does not implement `Add`, needed by `+`

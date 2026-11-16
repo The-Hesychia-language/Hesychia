@@ -1,0 +1,9 @@
+manual struct Box:
+    value: i32
+
+manual fn show(b: Box):
+    pass
+
+manual fn main():
+    pass
+# error: `b` must be borrowed or owned

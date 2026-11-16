@@ -1,0 +1,10 @@
+manual fn keep(owned s: str):
+    pass
+
+manual fn main():
+    const text: str = f"a{1}"
+    for i in range(3):
+        for j in range(3):
+            keep(text)
+            break
+# error: `text` would be moved again on the next iteration

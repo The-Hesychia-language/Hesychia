@@ -1,0 +1,14 @@
+from io import print
+from thread import spawn
+
+managed fn total(values: vector[i32]) -> i64:
+    sum = 0
+    for v in values:
+        sum += v
+    return sum
+
+managed fn main():
+    values = [x * 2 for x in range(5)]
+    t = spawn(total, values)
+    print(f"{t.join()} {len(values)}")
+# expect: 20 5

@@ -1,0 +1,16 @@
+manual enum E:
+    Bad
+    Worse
+
+manual struct Other:
+    code: i32
+
+manual fn risky() -> i32 raises E:
+    raise E.Bad
+
+manual fn safe() -> i32:
+    return 1
+
+manual fn main():
+    const x: i32 = check safe()
+# error: `safe` cannot raise; remove `check`

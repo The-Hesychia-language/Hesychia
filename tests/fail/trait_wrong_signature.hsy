@@ -1,0 +1,12 @@
+trait Named:
+    method name(&self) -> str
+
+manual struct A(Named):
+    x: i32
+
+    method name(&self) -> i32:
+        return 1
+
+manual fn main():
+    pass
+# error: `A.name` does not match the trait `Named`

@@ -1,0 +1,10 @@
+manual struct F(Drop):
+    x: i32
+
+    method drop(&mut self):
+        pass
+
+manual fn main():
+    mut f: F = F(1)
+    f.drop()
+# error: `drop` runs by itself when a `F` goes away

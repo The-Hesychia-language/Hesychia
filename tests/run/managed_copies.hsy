@@ -1,0 +1,31 @@
+from io import print
+
+managed struct Bag:
+    items: vector[i32]
+
+managed fn keep(v: vector[i32]) -> Bag:
+    return Bag(items=v)
+
+managed fn main():
+    v = vector[i32]()
+    v.push(7)
+    bag = keep(v)
+    v.push(8)
+    print(f"{len(bag.items)} {len(v)}")
+    first = bag
+    print(f"{len(first.items)} {len(bag.items)}")
+    names = vector[str]()
+    names.push("ann")
+    name = names[0]
+    names.push("bob")
+    print(f"{name} {len(names)}")
+    bags = vector[Bag]()
+    i = 0
+    while i < 2:
+        bags.push(first)
+        i += 1
+    print(f"{len(bags)}")
+# expect: 1 2
+# expect: 1 1
+# expect: ann 2
+# expect: 2

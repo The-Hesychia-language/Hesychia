@@ -1,0 +1,5 @@
+from lib.secret import Hidden
+
+manual fn main():
+    const h: Hidden = Hidden(1, 2)
+# error: `Hidden` has private fields

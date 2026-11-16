@@ -1,0 +1,35 @@
+from io import print
+
+manual struct Item:
+    name: str
+    count: i32
+
+manual fn total(owned items: vector[Item]) -> i32:
+    mut sum: i32 = 0
+    mut names: str = ""
+    for item in items:
+        sum += item.count
+        names += item.name
+        if item.count > 100:
+            break
+    print(names)
+    return sum
+
+manual fn bump(values: &mut vector[i32]):
+    for x in &mut values:
+        x += 10
+
+manual fn main():
+    mut values: vector[i32] = [1, 2, 3]
+    bump(&mut values)
+    for x in &mut values:
+        x *= 2
+    print(f"{values}")
+    mut items: vector[Item] = []
+    items.push(Item(name="a", count=1))
+    items.push(Item(name="b", count=200))
+    items.push(Item(name="c", count=3))
+    print(f"{total(items)}")
+# expect: [22, 24, 26]
+# expect: ab
+# expect: 201

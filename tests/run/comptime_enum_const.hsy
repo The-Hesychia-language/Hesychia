@@ -1,0 +1,27 @@
+from io import print
+
+managed enum Mode:
+    Fast
+    Safe
+
+comptime MODE: Mode = Mode.Safe
+
+comptime if MODE == Mode.Safe:
+    managed fn label() -> str:
+        return "safe build"
+else:
+    managed fn label() -> str:
+        return "fast build"
+
+managed fn main():
+    comptime LOCAL: Mode = Mode.Fast
+    comptime if LOCAL != MODE:
+        print(label())
+    m = MODE
+    match m:
+        case Mode.Safe:
+            print("value")
+        case Mode.Fast:
+            pass
+# expect: safe build
+# expect: value

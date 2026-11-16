@@ -1,0 +1,9 @@
+manual struct Box:
+    value: i32
+
+manual struct Holder:
+    inner: &Box
+
+manual fn main():
+    pass
+# error: a field cannot hold a reference

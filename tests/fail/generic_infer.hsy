@@ -1,0 +1,6 @@
+manual fn make[T]() -> i32:
+    return 1
+
+manual fn main():
+    const x: i32 = make()
+# error: cannot infer `T` in this call to `make`

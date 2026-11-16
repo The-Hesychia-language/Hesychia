@@ -1,0 +1,4 @@
+manual fn main():
+    const v: vector[i32] = [1, 2]
+    const w: vector[i32] = [x for x in &v]
+# error: list comprehensions are only for `managed` code

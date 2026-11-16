@@ -1,0 +1,54 @@
+import io
+from io import print
+import fs
+
+managed fn write_lines(path: str):
+    f = fs.open(path, fs.Mode.Write)
+    print("one", to=f)
+    print("two", to=f)
+    io.close(f)
+    g = fs.open(path, fs.Mode.Append)
+    print("three", to=g)
+
+managed fn main():
+    # Left by a run that stopped halfway.
+    if fs.exists("hsy-fs-test"):
+        fs.remove("hsy-fs-test", recursive=True)
+    fs.make_dir("hsy-fs-test")
+    write_lines("hsy-fs-test/notes.txt")
+    f = fs.open("hsy-fs-test/notes.txt")
+    first = io.read(f)
+    second = io.read(f)
+    rest = io.read(f, end="")
+    after = io.read(f)
+    print(f"{first} {second} {after}")
+    if rest is not None:
+        print(rest.replace("\n", "|"))
+    io.close(f)
+    write_lines("hsy-fs-test/data.csv")
+    print(f"{fs.exists("hsy-fs-test")} {fs.kind("hsy-fs-test", fs.Kind.Dir)} {fs.kind("hsy-fs-test", fs.Kind.File)}")
+    print(f"{fs.extension("hsy-fs-test/data.csv", "csv")} {fs.extension("hsy-fs-test/data.csv", "txt")} {fs.extension("notes", "")}")
+    found = fs.list_dir("hsy-fs-test")
+    found.sort()
+    print(f"{found}")
+    fs.rename("hsy-fs-test/data.csv", "hsy-fs-test/table.csv")
+    print(f"{fs.exists("hsy-fs-test/table.csv")} {fs.exists("hsy-fs-test/data.csv")}")
+    try:
+        fs.remove("hsy-fs-test")
+    except IoError as _e:
+        print("not empty")
+    fs.remove("hsy-fs-test", recursive=True)
+    print(f"{fs.exists("hsy-fs-test")}")
+    try:
+        fs.open("hsy-no-such-file")
+    except IoError as e:
+        print(f"{e.path}: {e.reason}")
+# expect: 'one' 'two' None
+# expect: three|
+# expect: True True False
+# expect: True False False
+# expect: ['hsy-fs-test/data.csv', 'hsy-fs-test/notes.txt']
+# expect: True False
+# expect: not empty
+# expect: False
+# expect: hsy-no-such-file: No such file or directory

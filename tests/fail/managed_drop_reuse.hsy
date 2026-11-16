@@ -1,0 +1,14 @@
+manual struct File(Drop):
+    fd: i32
+
+    method drop(&mut self):
+        pass
+
+manual fn close(owned f: File):
+    pass
+
+managed fn main():
+    f = File(fd=1)
+    close(f)
+    close(f)
+# error: it implements `Drop`, so it is never copied

@@ -1,0 +1,4 @@
+manual fn main():
+    const names: vector[str] = ["a"]
+    const first: str = names[0]
+# error: cannot move `names[...]` out of its owner

@@ -1,0 +1,24 @@
+from io import print
+
+manual fn show(value: Optional[u8]) -> str:
+    if value is None:
+        return "none"
+    return f"{value}"
+
+manual fn main():
+    const big: i32 = 300
+    const small: i32 = 42
+    print(f"{show(u8.checked(big))} {show(u8.checked(small))} {show(u8.checked(-1))}")
+    print(f"{u8.truncate(big)} {i8.truncate(200)} {u16.truncate(-1)}")
+    const f: f64 = 1e20
+    const n: f64 = -3.9
+    print(f"{i32.truncate(f)} {i32.truncate(n)} {u8.truncate(n)}")
+    const one: f32 = 1.0
+    print(f"{u32.reinterpret(one)} {f32.reinterpret(u32.reinterpret(one))}")
+    const bits: u64 = 9218868437227405312
+    print(f"{f64.reinterpret(bits)}")
+# expect: none 42 none
+# expect: 44 -56 65535
+# expect: 2147483647 -3 0
+# expect: 1065353216 1.0
+# expect: inf

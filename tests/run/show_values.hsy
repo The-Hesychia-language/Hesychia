@@ -1,0 +1,30 @@
+from io import print
+
+manual struct Point:
+    x: i32
+    y: f64
+
+manual enum Shape:
+    Circle(radius: f64)
+    Rect(w: i32, h: i32)
+    Empty
+
+manual struct Person:
+    name: str
+    tags: vector[str]
+    home: Optional[Point]
+
+manual fn make(n: i32) -> Point:
+    return Point(x=n, y=0.5)
+
+managed fn main():
+    p = Point(x=1, y=2.0)
+    people = [Person(name="Ann", tags=["a", "b"], home=Point(x=3, y=4.5)), Person(name="Bob", tags=vector[str](), home=None)]
+    print(f"{p} {Shape.Circle(1.5)} {Shape.Rect(2, 3)} {Shape.Empty}")
+    print(f"{people[0]}")
+    print(f"{people[1]}")
+    print(f"{[1, 2, 3]} {(1, 'c', "t")} {make(7)}")
+# expect: Point(x=1, y=2.0) Shape.Circle(radius=1.5) Shape.Rect(w=2, h=3) Shape.Empty
+# expect: Person(name='Ann', tags=['a', 'b'], home=Point(x=3, y=4.5))
+# expect: Person(name='Bob', tags=[], home=None)
+# expect: [1, 2, 3] (1, 'c', 't') Point(x=7, y=0.5)

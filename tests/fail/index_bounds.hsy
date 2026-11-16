@@ -1,0 +1,7 @@
+manual struct Box:
+    value: i32
+
+manual fn main():
+    const a: array[i32, 3] = [1, 2, 3]
+    const b: i32 = a[3]
+# error: index 3 is out of bounds

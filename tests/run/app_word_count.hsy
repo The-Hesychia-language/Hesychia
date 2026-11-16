@@ -1,0 +1,41 @@
+# Counts words in a text file, sorts them by count, and writes them as CSV.
+from io import print
+import io
+import fs
+import csv
+
+managed fn main():
+    f = fs.open("hsy-words.txt", fs.Mode.Write)
+    print("the cat and the dog\nThe end, the END.\n", to=f)
+    io.close(f)
+    g = fs.open("hsy-words.txt")
+    text = io.read(g, end="")
+    io.close(g)
+    counts = dict[str, i64]()
+    if text is not None:
+        for raw in text.split():
+            word = raw.strip().lower().replace(",", "").replace(".", "")
+            if word in counts:
+                counts[word] += 1
+            else:
+                counts[word] = 1
+    pairs = [(n, w) for w, n in counts.items()]
+    rows = vector[vector[str]]()
+    best = i64(0)
+    for n, _w in pairs:
+        best = max(best, n)
+    for n, w in pairs:
+        if n == best:
+            rows.push([w, str(n)])
+    for n, w in pairs:
+        if n != best:
+            rows.push([w, str(n)])
+    csv.dump(rows)
+    print(f"{len(counts)} words, {counts}")
+    fs.remove("hsy-words.txt")
+# expect: the,4
+# expect: cat,1
+# expect: and,1
+# expect: dog,1
+# expect: end,2
+# expect: 5 words, {'the': 4, 'cat': 1, 'and': 1, 'dog': 1, 'end': 2}

@@ -1,0 +1,6 @@
+manual fn small[N: u8]() -> i32:
+    return 1
+
+manual fn main():
+    const x: i32 = small[300]()
+# error: 300 does not fit in `u8`

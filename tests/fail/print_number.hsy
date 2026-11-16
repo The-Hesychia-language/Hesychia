@@ -1,0 +1,5 @@
+from io import print
+
+manual fn main():
+    print(3)
+# error: expected a `str`, found `i32`

@@ -1,0 +1,19 @@
+manual struct NotFound:
+    code: i32
+
+manual struct Denied:
+    code: i32
+
+manual fn open(n: i32) -> i32 raises NotFound | Denied:
+    if n == 1:
+        raise NotFound(code=1)
+    raise Denied(code=2)
+
+manual fn main():
+    try:
+        check open(1)
+    except e:
+        match e:
+            case NotFound as missing:
+                pass
+# error: `Denied`

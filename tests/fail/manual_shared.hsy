@@ -1,0 +1,3 @@
+manual fn main():
+    const x: shared[i32] = shared(1)
+# error: `shared` is only for `managed` code

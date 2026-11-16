@@ -1,0 +1,10 @@
+manual struct Oops:
+    code: i32
+
+managed fn fail(n: i32) -> i32:
+    if n > 0:
+        raise Oops(code=n)
+    return n
+
+managed fn main():
+    fail(1)

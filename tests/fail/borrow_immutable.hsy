@@ -1,0 +1,10 @@
+manual struct Box:
+    value: i32
+
+manual fn change(b: &mut Box):
+    b.value = 2
+
+manual fn main():
+    const x: Box = Box(1)
+    change(&mut x)
+# error: cannot borrow `x` with `&mut`

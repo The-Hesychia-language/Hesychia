@@ -1,0 +1,8 @@
+from thread import mutex
+
+managed fn main():
+    m = mutex(0)
+    with m as a:
+        with m as b:
+            b += a
+# error: `m` is already locked by the `with` around

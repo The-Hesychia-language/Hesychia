@@ -1,0 +1,6 @@
+manual fn show[T](x: &T) -> i32:
+    return x.size()
+
+manual fn main():
+    pass
+# error: no bound of `T` has a method `size`

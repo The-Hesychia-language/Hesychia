@@ -1,0 +1,8 @@
+manual enum Shape:
+    Circle(radius: f64)
+    Square(side: f64)
+    Empty
+
+manual fn main():
+    const s: Shape = Shape.Triangle(1.0)
+# error: `Shape` has no variant `Triangle`

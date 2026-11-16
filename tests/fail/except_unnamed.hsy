@@ -1,0 +1,16 @@
+manual enum E:
+    Bad
+    Worse
+
+manual struct Other:
+    code: i32
+
+manual fn risky() -> i32 raises E:
+    raise E.Bad
+
+manual fn main():
+    try:
+        const x: i32 = check risky()
+    except E:
+        pass
+# error: name the caught error: `except E as e:`

@@ -1,0 +1,7 @@
+manual fn twice(a: i32) -> i32:
+    const a: i32 = 2
+    return a
+
+manual fn main():
+    pass
+# error: `a` is already defined in this block

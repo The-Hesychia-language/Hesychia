@@ -1,0 +1,4 @@
+manual fn main():
+    const n: i32 = 4
+    const f: fn() -> i32 = lambda [&n] () -> i32: n
+# error: a lambda that captures can only be passed directly as an argument

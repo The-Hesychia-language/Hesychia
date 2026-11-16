@@ -1,0 +1,7 @@
+manual struct Pair[T]:
+    a: T
+    b: T
+
+manual fn main():
+    const p: Pair[i32, i32] = Pair(1, 2)
+# error: `Pair` takes 1 type argument(s)

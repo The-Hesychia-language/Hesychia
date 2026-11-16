@@ -1,0 +1,6 @@
+managed struct V(Equal):
+    x: i32
+
+manual fn main():
+    pass
+# error: `managed` structs do not implement traits

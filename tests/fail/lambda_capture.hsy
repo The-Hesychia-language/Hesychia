@@ -1,0 +1,4 @@
+manual fn main():
+    const n: i32 = 4
+    const f: fn() -> i32 = lambda () -> i32: n
+# error: this lambda uses `n`, a variable from outside

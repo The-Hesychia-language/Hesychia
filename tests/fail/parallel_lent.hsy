@@ -1,0 +1,5 @@
+managed fn main():
+    v = [1, 2, 3]
+    parallel for x in &mut v:
+        v.push(x)
+# error: `v` is lent item by item to this loop

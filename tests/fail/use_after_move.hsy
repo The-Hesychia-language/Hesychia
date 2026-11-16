@@ -1,0 +1,8 @@
+manual struct Box:
+    value: i32
+
+manual fn main():
+    const a: Box = Box(1)
+    const b: Box = a
+    const c: Box = a
+# error: `a` was moved away on line 6

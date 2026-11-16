@@ -1,0 +1,44 @@
+from io import print
+
+manual enum Maybe[T]:
+    Just(value: T)
+    Nothing
+
+manual enum Result[T, E]:
+    Ok(value: T)
+    Err(error: E)
+
+manual fn divide(a: i32, b: i32) -> Result[i32, str]:
+    if b == 0:
+        return Result.Err("division by zero")
+    return Result.Ok(a // b)
+
+manual fn show[T](m: &Maybe[T]) -> str:
+    match m:
+        case Maybe.Just(_):
+            return "just"
+        case Maybe.Nothing:
+            return "nothing"
+
+manual fn main():
+    const a: Maybe[i32] = Maybe.Just(4)
+    const b: Maybe[str] = Maybe.Nothing
+    print(f"{show(&a)} {show(&b)}")
+    match a:
+        case Maybe.Just(v):
+            print(f"value {v}")
+        case Maybe.Nothing:
+            pass
+    for d in range(2):
+        const r: Result[i32, str] = divide(10, d)
+        match r:
+            case Result.Ok(v):
+                print(f"ok {v}")
+            case Result.Err(e):
+                print(f"error: {e}")
+    print(f"{Maybe.Just(1) == Maybe.Just(1)} {a == Maybe.Nothing}")
+# expect: just nothing
+# expect: value 4
+# expect: error: division by zero
+# expect: ok 10
+# expect: True False

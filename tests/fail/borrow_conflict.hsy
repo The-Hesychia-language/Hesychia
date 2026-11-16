@@ -1,0 +1,10 @@
+manual struct Box:
+    value: i32
+
+manual fn both(a: &mut Box, b: &Box):
+    pass
+
+manual fn main():
+    mut x: Box = Box(1)
+    both(&mut x, &x)
+# error: `x` is already used by another argument

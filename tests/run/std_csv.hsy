@@ -1,0 +1,40 @@
+import io
+from io import print
+import fs
+import csv
+
+managed fn write(path: str, text: str):
+    f = fs.open(path, fs.Mode.Write)
+    print(text, end="", to=f)
+
+managed fn main():
+    write("hsy-csv-test.csv", "name,city,note\nana,Paris,\"says \"\"hi\"\"\"\nbob,\"Lyon, FR\",\"two\nlines\"\n")
+    f = fs.open("hsy-csv-test.csv")
+    rows = csv.load[vector](f)
+    io.close(f)
+    print(f"{len(rows)} {rows[1]} {rows[2][1]}")
+    g = fs.open("hsy-csv-test.csv")
+    people = csv.load[dict](g)
+    io.close(g)
+    print(f"{people[0]["city"]} {people[1]["note"].replace("\n", "|")}")
+    csv.dump(rows)
+    csv.dump(people, sep=";")
+    write("hsy-csv-test.csv", "a,\"b")
+    h = fs.open("hsy-csv-test.csv")
+    try:
+        csv.load[vector](h)
+    except CsvError as e:
+        print(f"line {e.line}: {e.reason}")
+    io.close(h)
+    fs.remove("hsy-csv-test.csv")
+# expect: 3 ['ana', 'Paris', 'says "hi"'] Lyon, FR
+# expect: Paris two|lines
+# expect: name,city,note
+# expect: ana,Paris,"says ""hi"""
+# expect: bob,"Lyon, FR","two
+# expect: lines"
+# expect: name;city;note
+# expect: ana;Paris;"says ""hi"""
+# expect: bob;Lyon, FR;"two
+# expect: lines"
+# expect: line 1: a quoted field is not closed

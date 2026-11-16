@@ -1,0 +1,4 @@
+manual fn main():
+    const v: vector[i32] = []
+    v.push(1)
+# error: `push` changes `v`, which is not mutable

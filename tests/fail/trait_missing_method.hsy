@@ -1,0 +1,9 @@
+trait Named:
+    method name(&self) -> str
+
+manual struct A(Named):
+    x: i32
+
+manual fn main():
+    pass
+# error: `A` implements `Named` but has no method `name`

@@ -1,0 +1,13 @@
+manual struct Box:
+    value: i32
+
+manual struct Counter:
+    n: i32
+
+    method zero() -> Counter:
+        return Counter(0)
+
+manual fn main():
+    const c: Counter = Counter(1)
+    const d: Counter = c.zero()
+# error: `zero` has no `self`; call it as `Counter.zero(...)`

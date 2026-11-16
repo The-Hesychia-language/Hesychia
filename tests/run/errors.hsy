@@ -1,0 +1,95 @@
+from io import print
+
+manual enum ParseError:
+    Empty
+    InvalidChar(pos: size)
+    TooLarge(text: str)
+
+manual struct IoError:
+    path: str
+
+manual fn digit(c: u8, pos: size) -> u32 raises ParseError:
+    if c < 48 or c > 57:
+        raise ParseError.InvalidChar(pos)
+    return u32(c - 48)
+
+manual fn parse_port(s: &vector[u8]) -> u16 raises ParseError:
+    if len(s) == 0:
+        raise ParseError.Empty
+    mut value: u32 = 0
+    for i in range(len(s)):
+        value = value * 10 + check digit(s[i], i)
+        if value > 65535:
+            raise ParseError.TooLarge(f"{value}")
+    return u16(value)
+
+manual fn open(path: &str, digits: &vector[u8]) raises IoError | ParseError:
+    if path == "missing":
+        raise IoError(path.copy())
+    const port: u16 = check parse_port(digits)
+    print(f"opened {path} on port {port}")
+
+manual fn describe(owned digits: vector[u8]) -> str:
+    try:
+        const port: u16 = check parse_port(&digits)
+        return f"port {port}"
+    except ParseError.InvalidChar(pos):
+        return f"invalid character at {pos}"
+    except ParseError.Empty:
+        return "empty input"
+    except ParseError.TooLarge(text):
+        return f"{text} is too large"
+
+manual fn attempt(path: &str, owned digits: vector[u8]):
+    try:
+        check open(path, &digits)
+    except IoError as e:
+        print(f"cannot open {e.path}")
+    except _err:
+        print("bad port")
+
+manual fn nested(owned digits: vector[u8]) -> str raises ParseError:
+    const note: str = f"{len(digits)} digits"
+    try:
+        const label: str = "inner"
+        const port: u16 = check parse_port(&digits)
+        return f"{label} {port} {note}"
+    except ParseError.Empty:
+        return "nothing"
+
+manual fn sample(i: i32) -> vector[u8]:
+    match i:
+        case 0:
+            return []
+        case 1:
+            return [55]
+        case _:
+            return [120, 1]
+
+manual fn main():
+    print(describe([56, 48]))
+    print(describe([56, 48, 97]))
+    print(describe([]))
+    print(describe([57, 57, 57, 57, 57]))
+    attempt("missing", [52])
+    attempt("server", [52, 52, 51])
+    attempt("server", [120])
+    for i in range(3):
+        try:
+            print(check nested(sample(i)))
+        except ParseError as e:
+            match e:
+                case ParseError.InvalidChar(pos):
+                    print(f"rethrown at {pos}")
+                case _:
+                    pass
+# expect: port 80
+# expect: invalid character at 2
+# expect: empty input
+# expect: 99999 is too large
+# expect: cannot open missing
+# expect: opened server on port 443
+# expect: bad port
+# expect: nothing
+# expect: inner 7 1 digits
+# expect: rethrown at 0

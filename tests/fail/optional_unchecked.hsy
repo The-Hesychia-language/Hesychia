@@ -1,0 +1,4 @@
+manual fn main():
+    const a: Optional[i32] = 3
+    const b: i32 = a + 1
+# error: mismatched types `Optional[i32]` and `i32`

@@ -1,0 +1,42 @@
+from io import print
+import time
+from thread import spawn, channel
+
+manual fn produce(owned tx: sender[str]):
+    time.sleep(20, unit=time.ms)
+    tx.send("late")
+
+managed fn main():
+    texts, words = channel[str]()
+    numbers, counts = channel[i64]()
+    numbers.send(7)
+    select:
+        case w = words.receive():
+            print(f"word {w}")
+        case n = counts.receive():
+            print(f"number {n}")
+    select:
+        case words.receive():
+            print("no")
+        else:
+            print("nothing ready")
+    select:
+        case words.receive():
+            print("no")
+        case time.sleep(10, unit=time.ms):
+            print("too slow")
+    t = spawn(produce, texts)
+    select:
+        case w = words.receive():
+            print(f"got {w}")
+        case time.sleep(2):
+            print("timeout")
+    t.join()
+    select:
+        case w = words.receive():
+            print(f"closed {w}")
+# expect: number 7
+# expect: nothing ready
+# expect: too slow
+# expect: got 'late'
+# expect: closed None

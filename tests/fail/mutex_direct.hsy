@@ -1,0 +1,6 @@
+from thread import mutex
+
+managed fn main():
+    m = mutex(0)
+    n = m + 1
+# error: mutex[i32]

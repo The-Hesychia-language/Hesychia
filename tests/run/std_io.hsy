@@ -1,0 +1,26 @@
+import io
+from io import IoError, print, stderr, stdout, sys_write
+
+@symbol("abs")
+extern fn c_abs(x: i32) -> i32
+
+manual fn raw(text: &str) -> size raises IoError:
+    mut bytes: vector[u8] = []
+    for i in range(byte_len(text)):
+        bytes.push(text.byte(i))
+    check io.flush(&stdout)
+    return check sys_write(&stdout, &bytes)
+
+managed fn main():
+    print("a", end="")
+    print("b")
+    print("to the error stream", to=stderr)
+    print("1", end=", ")
+    print("2", end="\n", to=stdout)
+    n = raw("raw\n")
+    big = u8(250)
+    print(f"{n} {big.wrapping_add(10)} {u8(3).wrapping_sub(5)} {c_abs(-4)}")
+# expect: ab
+# expect: 1, 2
+# expect: raw
+# expect: 4 4 254 4

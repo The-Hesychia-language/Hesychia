@@ -1,0 +1,21 @@
+from io import print
+
+manual fn fill(p: ptr[i32], n: size):
+    mut i: size = 0
+    while i < n:
+        p[i] = i32(i) * 10
+        i += 1
+
+manual fn main():
+    mut values: array[i32, 4] = [0, 0, 0, 0]
+    const first: ptr[i32] = ptr(&mut values[0])
+    fill(first, 4)
+    const third: ptr[i32] = first + 2
+    print(f"{values[3]} {third[0]} {third - first}")
+    mut x: u32 = 7
+    const px: ptr[u32] = ptr(&mut x)
+    px.volatile_write(px.volatile_read() + 1)
+    const bytes: ptr[u8] = ptr[u8](px)
+    print(f"{x} {bytes[0]}")
+# expect: 30 20 2
+# expect: 8 8

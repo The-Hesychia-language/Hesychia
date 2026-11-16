@@ -1,0 +1,10 @@
+extern fn printf(fmt: ptr[u8], ...) -> i32
+
+manual fn main():
+    const x: f64 = 3.99
+    const y: i32 = i32(x)
+    const z: i64 = i64(-2.5)
+    const w: u16 = u16(65535)
+    const f: f32 = f32(y) / 2.0
+    printf("%d %lld %u %.1f\n".to_c(), y, z, w, f)
+# expect: 3 -2 65535 1.5

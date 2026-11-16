@@ -1,0 +1,30 @@
+from io import print
+
+manual struct Empty:
+    code: i32
+
+managed fn first(values: vector[i32]) -> i32:
+    if len(values) == 0:
+        raise Empty(code=1)
+    return values[0]
+
+managed fn main():
+    try:
+        print(f"{first([4, 5])}")
+        print(f"{first(vector[i32]())}")
+    except Empty as e:
+        print(f"empty {e.code}")
+    more()
+
+managed fn check_all(values: vector[i32]):
+    if len(values) > 2:
+        raise Empty(code=2)
+
+managed fn more():
+    try:
+        check_all([1, 2, 3])
+    except Empty as e:
+        print(f"too many {e.code}")
+# expect: 4
+# expect: empty 1
+# expect: too many 2

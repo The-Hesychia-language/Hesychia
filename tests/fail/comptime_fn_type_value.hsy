@@ -1,0 +1,6 @@
+comptime fn pick(T: type) -> type:
+    return T
+
+managed fn main():
+    x = pick(i32)
+# error: this gives the type `i32`, not a value

@@ -1,0 +1,10 @@
+manual struct F(Drop):
+    x: i32
+
+    method drop(&mut self):
+        pass
+
+manual fn main():
+    const f: F = F(1)
+    const g: F = f.copy()
+# error: `F` implements `Drop` and cannot be copied

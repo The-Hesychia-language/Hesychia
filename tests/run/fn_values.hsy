@@ -1,0 +1,35 @@
+from io import print
+
+manual fn double(x: i32) -> i32:
+    return x * 2
+
+manual fn square(x: i32) -> i32:
+    return x * x
+
+manual fn apply(f: fn(i32) -> i32, owned values: vector[i32]) -> vector[i32]:
+    mut out: vector[i32] = []
+    for i in range(len(values)):
+        out.push(f(values[i]))
+    return out
+
+manual fn pick(big: bool) -> fn(i32) -> i32:
+    if big:
+        return square
+    return double
+
+manual fn shout(text: &str):
+    print(f"{text}!")
+
+manual fn main():
+    const results: vector[i32] = apply(double, [1, 2, 3])
+    print(f"{results[0]} {results[1]} {results[2]}")
+    const f: fn(i32) -> i32 = pick(True)
+    const g: fn(i32) -> i32 = pick(False)
+    print(f"{f(7)} {g(7)}")
+    const say: fn(&str) = shout
+    say("hi")
+    say(&"there")
+# expect: 2 4 6
+# expect: 49 14
+# expect: hi!
+# expect: there!

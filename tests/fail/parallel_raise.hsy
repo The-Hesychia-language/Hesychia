@@ -1,0 +1,5 @@
+managed fn main():
+    v = ["1", "x"]
+    parallel for s in v:
+        n = i64(s)
+# error: `ParseError` cannot leave a `parallel for`: its items run apart

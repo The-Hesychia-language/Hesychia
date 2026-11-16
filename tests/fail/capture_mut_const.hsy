@@ -1,0 +1,7 @@
+manual fn run(f: &fn()):
+    f()
+
+manual fn main():
+    const v: vector[i32] = []
+    run(lambda [&mut v] (): v.push(1))
+# error: cannot capture `v` with `&mut`

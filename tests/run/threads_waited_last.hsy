@@ -1,0 +1,25 @@
+# A thread left running reads until its channel closes; the sender, declared before it,
+# goes first at the end of the block.
+from io import print
+from thread import spawn, channel
+
+manual fn drain(owned rx: receiver[i64]) -> i64:
+    mut total: i64 = 0
+    mut open: bool = True
+    while open:
+        const x: Optional[i64] = rx.receive()
+        if x is None:
+            open = False
+        else:
+            total += x
+    print(f"drained {total}")
+    return total
+
+managed fn main():
+    tx, rx = channel[i64]()
+    _t = spawn(drain, rx)
+    tx.send(4)
+    tx.send(5)
+    print("sent")
+# expect: sent
+# expect: drained 9

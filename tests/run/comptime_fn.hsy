@@ -1,0 +1,55 @@
+from io import print
+
+comptime fn fact(n: i64) -> i64:
+    if n <= 1:
+        return 1
+    return n * fact(n - 1)
+
+comptime fn fib(n: i64) -> i64:
+    mut a: i64 = 0
+    mut b: i64 = 1
+    for i in range(n):
+        const next: i64 = a + b
+        a = b
+        b = next
+    return a
+
+# A type chosen from another.
+comptime fn wider(T: type) -> type:
+    if T == i8 or T == i16:
+        return i32
+    return i64
+
+comptime fn holder(R: type) -> type:
+    if R == dict:
+        return dict[str, i64]
+    return vector[item(R)]
+
+comptime N: i64 = fact(5)
+
+manual fn grow[T](owned x: T) -> wider(T):
+    comptime if wider(T) == i32:
+        return i32(x)
+    else:
+        return i64(x)
+
+manual fn first[T](v: &vector[T]) -> Optional[item(vector[T])]:
+    if len(v) == 0:
+        return None
+    return v[0].copy()
+
+manual fn names[R]() -> holder(R):
+    comptime if R == dict:
+        mut d: dict[str, i64] = dict[str, i64]()
+        d["one"] = 1
+        return d
+    else:
+        return [1, 2]
+
+managed fn main():
+    print(f"{N} {fact(4)} {fib(10)} {size_of[holder(vector[u8])]()}")
+    print(f"{grow(i8(100)) + 1000} {grow(i64(5))}")
+    print(f"{first([7, 8])} {names[vector[i64]]()} {len(names[dict]())}")
+# expect: 120 24 55 24
+# expect: 1100 5
+# expect: 7 [1, 2] 1

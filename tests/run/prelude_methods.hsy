@@ -1,0 +1,13 @@
+from io import print
+
+manual fn has_b(words: &vector[str]) -> bool:
+    return "b" in words
+
+managed fn main():
+    s = "hello world"
+    print(f"{s.starts_with("he")} {s.ends_with("ld")} {s.find("o w")} {"wor" in s} {"x" not in s}")
+    v = [1, 2, 3]
+    words = ["a", "b"]
+    print(f"{2 in v} {9 in v} {has_b(words)} {v.contains(3)}")
+# expect: True True 4 True True
+# expect: True False True True

@@ -1,0 +1,23 @@
+from io import print
+
+managed struct Person:
+    name: str
+    friends: vector[shared[Person]]
+
+managed fn befriend(a: shared[Person], b: shared[Person]):
+    a.friends.push(b)
+    b.friends.push(a)
+
+managed fn main():
+    alice = shared(Person(name="alice", friends=vector[shared[Person]]()))
+    bob = shared(Person(name="bob", friends=vector[shared[Person]]()))
+    befriend(alice, bob)
+    bob.name = "robert"
+    print(f"{alice.friends[0].name} {len(bob.friends)}")
+    counter = shared(vector[i32]())
+    other = counter
+    other.push(1)
+    counter.push(2)
+    print(f"{len(counter)} {len(other)}")
+# expect: robert 1
+# expect: 2 2

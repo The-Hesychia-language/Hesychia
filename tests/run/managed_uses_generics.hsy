@@ -1,0 +1,40 @@
+from io import print
+
+manual struct Empty:
+    code: i32
+
+manual struct Stack[T]:
+    items: vector[T]
+
+    method push(&mut self, owned item: T):
+        self.items.push(item)
+
+    method pop(&mut self) -> Optional[T]:
+        return self.items.pop()
+
+    method size(&self) -> size:
+        return len(self.items)
+
+manual fn count[T](items: &vector[T]) -> size:
+    return len(items)
+
+manual fn not_empty[T](items: &vector[T]) -> size raises Empty:
+    if len(items) == 0:
+        raise Empty(code=0)
+    return len(items)
+
+managed fn main():
+    words = ["a", "b"]
+    numbers = [1, 2, 3]
+    print(f"{count(words)} {count(numbers)}")
+    stack = Stack[str]([])
+    stack.push("x")
+    stack.push(words[1])
+    print(f"{stack.size()} {stack.pop()} {stack.size()}")
+    try:
+        print(f"{not_empty(numbers)} {not_empty(vector[i32]())}")
+    except Empty as e:
+        print(f"empty {e.code}")
+# expect: 2 3
+# expect: 2 'b' 1
+# expect: empty 0

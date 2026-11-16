@@ -1,0 +1,16 @@
+manual enum E:
+    Bad
+    Worse
+
+manual struct Other:
+    code: i32
+
+manual fn risky() -> i32 raises E:
+    raise E.Bad
+
+manual fn caller() -> i32:
+    return check risky()
+
+manual fn main():
+    pass
+# error: `E` can be raised here, but `caller` does not declare it

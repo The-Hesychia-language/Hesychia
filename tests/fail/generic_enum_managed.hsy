@@ -1,0 +1,6 @@
+managed enum Box[T]:
+    Empty
+
+manual fn main():
+    pass
+# error: a `managed` enum cannot have type parameters: write it in `manual`

@@ -1,0 +1,5 @@
+manual fn main():
+    const a: i32 = 1
+    const b: i64 = 2
+    const c: i64 = a + b
+# error: mismatched types `i32` and `i64`

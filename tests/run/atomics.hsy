@@ -1,0 +1,16 @@
+from io import print
+from thread import atomic
+
+manual fn bump(counter: &atomic[i64]) -> i64:
+    return counter.add(5)
+
+manual fn main():
+    const counter: atomic[i64] = atomic(10)
+    const before: i64 = bump(&counter)
+    counter.sub(1)
+    const swapped: bool = counter.compare_exchange(14, 100)
+    const missed: bool = counter.compare_exchange(14, 0)
+    const flag: atomic[bool] = atomic(False)
+    flag.store(True)
+    print(f"{before} {counter.load()} {swapped} {missed} {flag.exchange(False)} {flag.load()}")
+# expect: 10 100 True False True False

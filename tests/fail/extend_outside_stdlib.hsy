@@ -1,0 +1,7 @@
+extend str:
+    method shout(&self) -> str:
+        return f"{self}!"
+
+manual fn main():
+    pass
+# error: only the standard library can `extend` a built-in type

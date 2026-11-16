@@ -1,0 +1,8 @@
+from lib.secret import visible
+
+manual fn visible() -> i32:
+    return 2
+
+manual fn main():
+    pass
+# error: is already defined in this module

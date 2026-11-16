@@ -1,0 +1,32 @@
+from io import print
+
+comptime BUFFER: size = 3
+
+manual fn zeros[N: size]() -> array[i32, N]:
+    mut out: array[i32, N] = [0, 0, 0]
+    return out
+
+manual fn filled[N: size](value: i32) -> vector[i32]:
+    mut out: vector[i32] = []
+    for _i in range(N):
+        out.push(value)
+    return out
+
+manual fn total[N: size](values: &array[i64, N]) -> i64:
+    mut sum: i64 = 0
+    for i in range(N):
+        sum += values[i]
+    return sum
+
+manual fn main():
+    const z: array[i32, BUFFER] = zeros[BUFFER]()
+    print(f"{z[2]}")
+    const four: vector[i32] = filled[4](7)
+    const two: vector[i32] = filled[2](7)
+    print(f"{len(four)} {len(two)}")
+    const a: array[i64, 4] = [1, 2, 3, 4]
+    const b: array[i64, 2] = [10, 20]
+    print(f"{total(&a)} {total(&b)}")
+# expect: 0
+# expect: 4 2
+# expect: 10 30

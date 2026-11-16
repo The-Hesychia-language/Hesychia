@@ -1,0 +1,9 @@
+manual struct Box:
+    value: i32
+
+manual fn get(b: &Box) -> &Box:
+    return b
+
+manual fn main():
+    pass
+# error: functions cannot return references

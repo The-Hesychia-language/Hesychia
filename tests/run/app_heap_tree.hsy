@@ -1,0 +1,47 @@
+# A search tree as a recursive enum: `heap` holds the branches, `deallocate` takes one out.
+from io import print
+
+manual enum Tree[T: Order]:
+    Leaf
+    Node(left: heap[Tree[T]], item: T, right: heap[Tree[T]])
+
+manual fn insert[T: Order](owned tree: Tree[T], owned item: T) -> Tree[T]:
+    match tree:
+        case Tree.Leaf:
+            return Tree.Node(left=allocate(Tree.Leaf), item=item, right=allocate(Tree.Leaf))
+        case Tree.Node(left, here, right):
+            if item < here:
+                return Tree.Node(left=allocate(insert(deallocate(left), item)), item=here, right=right)
+            return Tree.Node(left=left, item=here, right=allocate(insert(deallocate(right), item)))
+
+manual fn walk[T: Order](tree: &Tree[T], out: &mut vector[T]):
+    match tree:
+        case Tree.Leaf:
+            pass
+        case Tree.Node(left, item, right):
+            walk(&left, out)
+            out.push(item.copy())
+            walk(&right, out)
+
+manual fn depth[T: Order](tree: &Tree[T]) -> i64:
+    match tree:
+        case Tree.Leaf:
+            return 0
+        case Tree.Node(left, _, right):
+            return 1 + max(&depth(&left), depth(&right))
+
+manual fn main():
+    mut numbers: Tree[i64] = Tree.Leaf
+    for n in [i64(5), 2, 8, 1, 9, 3]:
+        numbers = insert(numbers, n)
+    mut sorted: vector[i64] = []
+    walk(&numbers, &mut sorted)
+    print(f"{sorted} depth {depth(&numbers)}")
+    mut words: Tree[str] = Tree.Leaf
+    for w in ["pear", "apple", "fig"]:
+        words = insert(words, w)
+    mut ordered: vector[str] = []
+    walk(&words, &mut ordered)
+    print(f"{ordered}")
+# expect: [1, 2, 3, 5, 8, 9] depth 3
+# expect: ['apple', 'fig', 'pear']

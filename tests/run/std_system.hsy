@@ -1,0 +1,21 @@
+from io import IoError, print
+import os
+import random
+
+manual fn key() -> size raises IoError:
+    const bytes: vector[u8] = check random.sys_bytes(16)
+    return len(bytes)
+
+managed fn main():
+    print(f"{key()}")
+    comptime if target.os == "windows":
+        print(f"{os.run(["cmd", "/c", "exit 3"])}")
+    else:
+        print(f"{os.run(["sh", "-c", "exit 3"])}")
+    try:
+        os.run(["hsy-no-such-program"])
+    except IoError as e:
+        print(f"{e.path}: {e.reason}")
+# expect: 16
+# expect: 3
+# expect: hsy-no-such-program: the program could not start

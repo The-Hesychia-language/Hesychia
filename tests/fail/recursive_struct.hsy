@@ -1,0 +1,9 @@
+manual struct Box:
+    value: i32
+
+manual struct Node:
+    next: Node
+
+manual fn main():
+    pass
+# error: `Node` contains itself

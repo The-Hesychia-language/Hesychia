@@ -1,0 +1,13 @@
+from io import print
+from thread import atomic
+
+manual fn main():
+    const total: i64 = 5
+    const sum: atomic[i64] = atomic(i64(0))
+    parallel for i in range(i64(0), 4):
+        const total: i64 = i * 2
+        sum.add(total)
+    parallel for i in range(i64(0), 4):
+        sum.add(1)
+    print(f"{sum.load()} {total}")
+# expect: 16 5

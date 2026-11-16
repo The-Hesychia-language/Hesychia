@@ -1,0 +1,19 @@
+from io import print
+
+managed struct Node:
+    value: i32
+    next: Optional[Node]
+
+managed fn total(node: Node) -> i64:
+    sum = 0
+    sum += node.value
+    if node.next is not None:
+        sum += total(node.next)
+    return sum
+
+managed fn main():
+    last = Node(value=3, next=None)
+    middle = Node(value=2, next=last)
+    first = Node(value=1, next=middle)
+    print(f"{total(first)}")
+# expect: 6

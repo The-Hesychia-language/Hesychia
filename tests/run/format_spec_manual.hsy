@@ -1,0 +1,11 @@
+from io import print
+manual struct P(Show):
+    x: i32
+    method show(&self) -> str:
+        return f"P{self.x}"
+manual fn main():
+    const p: P = P(x=3)
+    const s: str = f"ab{1}"
+    const v: vector[i32] = [1, 2]
+    print(f"[{p:>5}] [{s.upper():_<6}] [{v:^8}] [{len(s):3}] [{2.5:6.2f}]")
+# expect: [   P3] [AB1___] [ [1, 2] ] [  3] [  2.50]

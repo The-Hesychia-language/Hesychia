@@ -1,0 +1,31 @@
+extern fn printf(fmt: ptr[u8], ...) -> i32
+
+manual fn fib(n: i32) -> i64:
+    mut a: i64 = 0
+    mut b: i64 = 1
+    mut i: i32 = 0
+    while True:
+        if i == n:
+            break
+        const next: i64 = a + b
+        a = b
+        b = next
+        i += 1
+    return a
+
+manual fn main() -> i32:
+    mut n: i32 = 0
+    while n < 10:
+        n += 1
+        if n % 2 == 0:
+            continue
+        printf("%d:%lld ".to_c(), n, fib(n))
+    printf("\n".to_c())
+    const bits: u8 = ~u8(0b1111_0000)
+    const neg: i8 = -128
+    printf("%u %d %d\n".to_c(), bits, neg, 7 // 2)
+    if not (n > 5 and n < 20) or False:
+        return 1
+    return 0
+# expect: 1:1 3:2 5:5 7:13 9:34 
+# expect: 15 -128 3

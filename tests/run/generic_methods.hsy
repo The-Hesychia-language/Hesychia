@@ -1,0 +1,31 @@
+from io import print
+
+manual struct Pair[T]:
+    a: T
+    b: T
+
+    method map[U](&self, f: &fn(&T) -> U) -> Pair[U]:
+        return Pair(f(&self.a), f(&self.b))
+
+manual struct Counter:
+    n: i32
+
+    method apply[T: Add](&self, x: &T, y: &T) -> T:
+        return x + y
+
+    method describe[T](&self, value: &T, f: &fn(&T) -> str) -> str:
+        return f"{self.n}: {f(value)}"
+
+manual fn main():
+    const p: Pair[i32] = Pair(3, 4)
+    const words: Pair[str] = p.map(lambda (x: &i32) -> str: f"<{x}>")
+    print(f"{words.a} {words.b}")
+    const doubled: Pair[i64] = p.map(lambda (x: &i32) -> i64: i64(x) * 2)
+    print(f"{doubled.b}")
+    const c: Counter = Counter(7)
+    print(f"{c.apply(&1, &2)} {c.apply(&"a", &"b")}")
+    print(c.describe(&1.5, lambda (x: &f64) -> str: f"{x}"))
+# expect: <3> <4>
+# expect: 8
+# expect: 3 ab
+# expect: 7: 1.5

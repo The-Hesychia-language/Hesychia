@@ -1,0 +1,14 @@
+managed fn steps(limit: i32) -> i64:
+    count = 0
+    const big: i64 = 5000000000
+    i = 0
+    while i < limit:
+        count += big
+        i += 1
+    return count
+    text = "n="
+    return text
+
+managed fn main():
+    steps(2)
+# error: expected `i64`, found `str`

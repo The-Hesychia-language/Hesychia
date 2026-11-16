@@ -1,0 +1,27 @@
+extern fn printf(fmt: ptr[u8], ...) -> i32
+extern fn getenv(name: ptr[u8]) -> Optional[ptr[u8]]
+
+manual struct Item:
+    id: i32
+    parent: Optional[i32]
+
+manual enum Event:
+    Created(item: Item)
+    Deleted(id: i32)
+
+manual fn handle(owned e: Event) -> i32:
+    match e:
+        case Event.Created(item):
+            if item.parent is not None:
+                return item.parent
+            return item.id
+        case Event.Deleted(id):
+            return -id
+
+manual fn main():
+    const home: Optional[ptr[u8]] = getenv("HSY_SURELY_UNSET".to_c())
+    if home is None:
+        printf("unset\n".to_c())
+    printf("%d %d %d\n".to_c(), handle(Event.Created(Item(1, None))), handle(Event.Created(Item(2, 7))), handle(Event.Deleted(3)))
+# expect: unset
+# expect: 1 7 -3

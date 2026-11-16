@@ -1,0 +1,13 @@
+manual fn keep(owned s: str):
+    pass
+
+manual fn main():
+    const text: str = f"a{1}"
+    mut i: i32 = 0
+    while i < 3:
+        i += 1
+        keep(text)
+        if i < 2:
+            continue
+        return
+# error: `text` would be moved again on the next iteration

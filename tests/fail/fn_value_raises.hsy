@@ -1,0 +1,9 @@
+manual fn risky() -> i32 raises E:
+    raise E.Bad
+
+manual enum E:
+    Bad
+
+manual fn main():
+    const f: fn() -> i32 = risky
+# error: `risky` cannot be used as a value yet

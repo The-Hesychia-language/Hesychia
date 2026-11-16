@@ -1,0 +1,31 @@
+from io import print
+
+manual struct Oops:
+    code: i32
+
+managed fn name(n: i32) -> str:
+    return f"item{n}"
+
+managed fn check_len(s: str, n: i32) -> bool:
+    if n > 1:
+        raise Oops(code=n)
+    return len(s) > 0
+
+managed fn main():
+    for n in range(3):
+        try:
+            if n >= 0 and check_len(name(n), n):
+                print(f"{name(n)} {n > 5 or check_len(name(n + 1), n)}")
+            count = 0
+            while count < 2 and check_len(name(count), n):
+                count += 1
+            while check_len(name(count), n) and count < 4:
+                count += 1
+            print(f"{count}")
+        except Oops as e:
+            print(f"failed {e.code}")
+# expect: item0 True
+# expect: 4
+# expect: item1 True
+# expect: 4
+# expect: failed 2

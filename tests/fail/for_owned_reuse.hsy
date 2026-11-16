@@ -1,0 +1,6 @@
+manual fn main():
+    const values: vector[str] = ["a"]
+    for x in values:
+        pass
+    const n: size = len(values)
+# error: `values` was moved away

@@ -1,0 +1,3 @@
+manual fn main():
+    const n: i64 = i64("4")
+# error: `i64` can raise; mark the call with `check`

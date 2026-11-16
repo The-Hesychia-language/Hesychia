@@ -1,0 +1,6 @@
+manual fn main():
+    const n: i32 = 4
+
+    manual fn get() -> i32:
+        return n
+# error: `n`, a variable from outside

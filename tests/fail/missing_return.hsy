@@ -1,0 +1,7 @@
+manual fn f(x: i32) -> i32:
+    if x > 0:
+        return 1
+
+manual fn main():
+    pass
+# error: can end without returning

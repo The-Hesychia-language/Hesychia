@@ -1,0 +1,16 @@
+manual enum E:
+    Bad
+    Worse
+
+manual struct Other:
+    code: i32
+
+manual fn risky() -> i32 raises E:
+    raise E.Bad
+
+manual fn main():
+    try:
+        pass
+    except e:
+        pass
+# error: nothing in this `try` can raise

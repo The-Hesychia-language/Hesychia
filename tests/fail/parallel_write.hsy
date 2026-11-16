@@ -1,0 +1,9 @@
+from io import print
+
+managed fn main():
+    v = [1, 2, 3]
+    total = 0
+    parallel for x in v:
+        total += x
+    print(f"{total}")
+# error: a `parallel for` only reads `total`, which is outside it

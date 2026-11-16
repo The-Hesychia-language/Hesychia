@@ -1,0 +1,6 @@
+manual fn helper[&x]():
+    pass
+
+manual fn main():
+    pass
+# error: only a function defined inside another one can capture

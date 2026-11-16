@@ -1,0 +1,26 @@
+from io import print
+
+manual fn upper(s: &str) -> str:
+    mut bytes: vector[u8] = []
+    for i in range(byte_len(s)):
+        const b: u8 = s.byte(i)
+        if b >= 97 and b <= 122:
+            bytes.push(b - 32)
+        else:
+            bytes.push(b)
+    const text: Optional[str] = str.from_bytes(&bytes)
+    if text is None:
+        return "?"
+    return text
+
+managed fn main():
+    word = "héllo"
+    print(f"{upper(word)} {word.byte(0)} {byte_len(word)} {word.hash() == "héllo".hash()}")
+    raw = vector[u8]()
+    raw.push(104)
+    raw.push(105)
+    bad = vector[u8]()
+    bad.push(255)
+    print(f"{str.from_bytes(raw)} {str.from_bytes(bad)}")
+# expect: HéLLO 104 6 True
+# expect: 'hi' None

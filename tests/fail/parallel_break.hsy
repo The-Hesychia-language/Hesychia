@@ -1,0 +1,6 @@
+managed fn main():
+    v = [1, 2, 3]
+    parallel for x in v:
+        if x == 2:
+            break
+# error: a `parallel for` cannot `break`: its items run apart

@@ -1,0 +1,8 @@
+manual struct Box[T]:
+    items: vector[T]
+
+manual fn main():
+    const b: i32 = 0
+    const x: Box[i32] = Box[i32]([])
+    const y: i32 = len(Box([]).items)
+# error: cannot infer `T` in `Box(...)`

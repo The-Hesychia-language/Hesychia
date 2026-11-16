@@ -1,0 +1,16 @@
+manual enum E:
+    Bad
+    Worse
+
+manual struct Other:
+    code: i32
+
+manual fn risky() -> i32 raises E:
+    raise E.Bad
+
+manual fn main():
+    try:
+        const x: i32 = check risky()
+    except Other as o:
+        pass
+# error: `Other` is never raised in this `try`

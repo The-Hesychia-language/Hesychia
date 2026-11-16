@@ -1,0 +1,64 @@
+from io import print
+
+manual struct Point(Hash):
+    x: i32
+    y: i32
+
+    method hash(&self) -> u64:
+        return self.x.hash() ^ (self.y.hash() << 1)
+
+manual struct Map[K: Hash + Equal, V](Index, IndexSet, Contains, Len):
+    hashes: vector[u64]
+    keys: vector[K]
+    values: vector[V]
+
+    method find(&self, key: &K) -> Optional[size]:
+        const h: u64 = key.hash()
+        for i in range(len(self.keys)):
+            if self.hashes[i] == h and self.keys[i] == key:
+                return i
+        return None
+
+    method index(&self, key: &K) -> ptr[V]:
+        const at: Optional[size] = self.find(key)
+        if at is None:
+            panic("missing key")
+        return ptr(&self.values[at])
+
+    method set_index(&mut self, owned key: K, owned value: V):
+        const at: Optional[size] = self.find(&key)
+        if at is not None:
+            self.values[at] = value
+            return
+        self.hashes.push(key.hash())
+        self.keys.push(key)
+        self.values.push(value)
+
+    method contains(&self, key: &K) -> bool:
+        return self.find(key) is not None
+
+    method len(&self) -> size:
+        return len(self.keys)
+
+managed fn main():
+    ages = Map[str, i32]([], [], [])
+    ages["ana"] = 31
+    ages["bob"] = 25
+    ages["ana"] += 1
+    print(f"{ages["ana"]} {ages["bob"]} {len(ages)} {"bob" in ages} {"eve" in ages}")
+    words = Map[i64, str]([], [], [])
+    words[7] = "seven"
+    words[7] = "sept"
+    print(f"{words[7]} {len(words)}")
+    grid = Map[Point, str]([], [], [])
+    grid[Point(x=1, y=2)] = "a"
+    print(f"{grid[Point(x=1, y=2)]} {Point(x=2, y=1) in grid}")
+    names = Map[str, str]([], [], [])
+    names["a"] = "x"
+    copy = names["a"]
+    copy += "y"
+    print(f"{copy} {names["a"]}")
+# expect: 32 25 2 True False
+# expect: sept 1
+# expect: a False
+# expect: xy x

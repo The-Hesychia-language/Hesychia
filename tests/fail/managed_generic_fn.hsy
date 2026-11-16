@@ -1,0 +1,6 @@
+managed fn first[T](items: vector[T]) -> size:
+    return len(items)
+
+managed fn main():
+    pass
+# error: a `managed` function cannot have type parameters

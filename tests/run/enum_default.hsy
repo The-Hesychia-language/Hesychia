@@ -1,0 +1,16 @@
+from io import print
+
+managed enum Speed:
+    Slow
+    Fast
+
+managed fn go(speed: Speed = Speed.Slow) -> str:
+    match speed:
+        case Speed.Slow:
+            return "slow"
+        case Speed.Fast:
+            return "fast"
+
+managed fn main():
+    print(f"{go()} {go(speed=Speed.Fast)}")
+# expect: slow fast

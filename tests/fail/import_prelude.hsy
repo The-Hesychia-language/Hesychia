@@ -1,0 +1,5 @@
+import prelude
+
+manual fn main():
+    pass
+# error: the prelude is known in every module

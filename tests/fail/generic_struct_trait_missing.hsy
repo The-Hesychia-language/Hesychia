@@ -1,0 +1,6 @@
+manual struct Pair[T](Equal):
+    a: T
+
+manual fn main():
+    const p: Pair[i32] = Pair(1)
+# error: has no method `equal`

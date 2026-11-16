@@ -1,0 +1,75 @@
+extern fn printf(fmt: ptr[u8], ...) -> i32
+
+managed enum Color:
+    Red
+    Green
+    Blue
+
+manual enum Shape:
+    Circle(radius: f64)
+    Rect(width: f64, height: f64)
+    Empty
+
+manual fn area(shape: &Shape) -> f64:
+    match shape:
+        case Shape.Circle(r):
+            return 3.0 * r * r
+        case Shape.Rect(w, h):
+            return w * h
+        case Shape.Empty:
+            return 0.0
+
+manual fn describe(n: i32) -> i32:
+    match n:
+        case 0:
+            return 100
+        case 1 | 2 | 3:
+            return 200
+        case -1:
+            return 300
+        case other:
+            return other
+
+manual fn find(values: &array[i32, 4], wanted: i32) -> Optional[i64]:
+    for i in range(4):
+        if values[i] == wanted:
+            return i64(i)
+    return None
+
+manual fn show(found: Optional[i64]):
+    if found is None:
+        printf("none ".to_c())
+        return
+    printf("%lld ".to_c(), found)
+
+manual fn main():
+    const shapes: array[Shape, 3] = [Shape.Circle(1.0), Shape.Rect(width=2.0, height=3.0), Shape.Empty]
+    for i in range(3):
+        printf("%.1f ".to_c(), area(&shapes[i]))
+    printf("\n".to_c())
+    printf("%d %d %d %d\n".to_c(), describe(0), describe(2), describe(-1), describe(42))
+    const values: array[i32, 4] = [5, 6, 7, 8]
+    show(find(&values, 7))
+    show(find(&values, 9))
+    const maybe: Optional[i64] = find(&values, 8)
+    if maybe is not None and maybe > 2:
+        printf("big %lld\n".to_c(), maybe)
+    mut c: Color = Color.Green
+    if c == Color.Green:
+        c = Color.Blue
+    match c:
+        case Color.Red | Color.Green:
+            printf("warm\n".to_c())
+        case Color.Blue:
+            printf("blue\n".to_c())
+    const flag: bool = True
+    match flag:
+        case True:
+            printf("yes\n".to_c())
+        case False:
+            printf("no\n".to_c())
+# expect: 3.0 6.0 0.0 
+# expect: 100 200 300 42
+# expect: 2 none big 3
+# expect: blue
+# expect: yes

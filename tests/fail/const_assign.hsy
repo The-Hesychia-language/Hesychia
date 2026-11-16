@@ -1,0 +1,4 @@
+manual fn main():
+    const x: i32 = 1
+    x = 2
+# error: cannot assign twice to `x`

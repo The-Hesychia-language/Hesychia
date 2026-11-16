@@ -1,0 +1,12 @@
+from io import print
+
+extern fn qsort(base: ptr[i32], count: size, width: size, compare: fn(ptr[i32], ptr[i32]) -> i32)
+
+manual fn descending(a: ptr[i32], b: ptr[i32]) -> i32:
+    return b[0] - a[0]
+
+manual fn main():
+    mut values: array[i32, 5] = [3, 1, 4, 1, 5]
+    qsort(ptr(&mut values[0]), 5, size_of[i32](), descending)
+    print(f"{values[0]} {values[1]} {values[4]}")
+# expect: 5 4 1

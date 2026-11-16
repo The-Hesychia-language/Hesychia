@@ -1,0 +1,13 @@
+from io import print
+
+managed fn main():
+    d = dict[str, i64]()
+    d["a"] = 1
+    d["b"] = 2
+    s = set[str]()
+    s.add("x")
+    e = set[i64]()
+    nested = dict[i64, vector[str]]()
+    nested[1] = ["p"]
+    print(f"{d} {s} {e} {nested} {[d]} {str(d)}")
+# expect: {'a': 1, 'b': 2} {'x'} set() {1: ['p']} [{'a': 1, 'b': 2}] {'a': 1, 'b': 2}

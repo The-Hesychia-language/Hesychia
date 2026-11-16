@@ -1,0 +1,20 @@
+from io import print
+
+manual enum Tree:
+    Leaf(n: i32)
+    Node(kids: vector[Tree])
+
+manual fn total(t: &Tree) -> i32:
+    match t:
+        case Tree.Leaf(n):
+            return n
+        case Tree.Node(kids):
+            mut sum: i32 = 0
+            for i in range(len(kids)):
+                sum += total(&kids[i])
+            return sum
+
+manual fn main():
+    const t: Tree = Tree.Node([Tree.Leaf(1), Tree.Node([Tree.Leaf(2)])])
+    print(f"{total(&t)}")
+# expect: 3

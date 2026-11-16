@@ -1,0 +1,7 @@
+manual struct Box:
+    value: i32
+
+manual fn main():
+    const b: Box = Box(1)
+    const found: bool = 1 in b
+# error: `in` does not apply to `Box`

@@ -1,0 +1,26 @@
+from io import print
+
+comptime FACTOR: i32 = 3
+
+manual fn apply(f: fn(i32) -> i32, x: i32) -> i32:
+    return f(x)
+
+manual fn each(owned words: vector[str], f: fn(&str)):
+    for i in range(len(words)):
+        f(&words[i])
+
+manual fn main():
+    print(f"{apply(lambda (x: i32) -> i32: x * 2, 21)}")
+    const triple: fn(i32) -> i32 = lambda (x: i32) -> i32: x * FACTOR
+    print(f"{triple(5)} {apply(triple, 2)}")
+    const join: fn(&str, &str) -> str = lambda (a: &str, b: &str) -> str: a + "-" + b
+    print(join("left", "right"))
+    each(["a", "b"], lambda (w: &str): print(f"<{w}>"))
+    const nested: fn(i32) -> i32 = lambda (x: i32) -> i32: apply(lambda (y: i32) -> i32: y + 1, x)
+    print(f"{nested(9)}")
+# expect: 42
+# expect: 15 6
+# expect: left-right
+# expect: <a>
+# expect: <b>
+# expect: 10

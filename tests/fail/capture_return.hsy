@@ -1,0 +1,6 @@
+manual fn keep(f: &fn()) -> &fn():
+    return f
+
+manual fn main():
+    pass
+# error: functions cannot return references

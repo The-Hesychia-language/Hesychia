@@ -1,0 +1,21 @@
+extern fn printf(fmt: ptr[u8], ...) -> i32
+
+comptime BLOCK: size = 256 * 4
+comptime HALF: size = BLOCK // 2
+
+comptime if target.pointer_bits == 64:
+    comptime WORD: u8 = 8
+else:
+    comptime WORD: u8 = 4
+
+comptime assert(size_of[u64]() == 8, "u64 must be 8 bytes")
+
+manual fn main():
+    comptime LOCAL: i32 = 7 * 6
+    comptime if target.debug:
+        printf("debug ".to_c())
+    else:
+        printf("release ".to_c())
+    printf("%zu %zu %u %d %zu\n".to_c(), BLOCK, HALF, WORD, LOCAL, align_of[i128]())
+# expect-debug: debug 1024 512 8 42 16
+# expect-release: release 1024 512 8 42 16

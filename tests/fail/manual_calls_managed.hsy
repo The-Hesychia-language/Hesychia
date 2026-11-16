@@ -1,0 +1,6 @@
+managed fn helper() -> i32:
+    return 1
+
+manual fn main():
+    const x: i32 = helper()
+# error: `manual` code cannot call `helper`, a `managed` function

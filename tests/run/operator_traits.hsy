@@ -1,0 +1,64 @@
+from io import print
+
+manual struct Table(Index, IndexSet, Contains, Len, Slice):
+    keys: vector[str]
+    values: vector[i32]
+
+    method find(&self, key: &str) -> Optional[size]:
+        for i in range(len(self.keys)):
+            if self.keys[i] == key:
+                return i
+        return None
+
+    method index(&self, key: &str) -> ptr[i32]:
+        const at: Optional[size] = self.find(key)
+        if at is None:
+            panic(f"no key {key}")
+        return ptr(&self.values[at])
+
+    method set_index(&mut self, owned key: str, owned value: i32):
+        const at: Optional[size] = self.find(&key)
+        if at is not None:
+            self.values[at] = value
+            return
+        self.keys.push(key)
+        self.values.push(value)
+
+    method contains(&self, key: &str) -> bool:
+        return self.find(key) is not None
+
+    method len(&self) -> size:
+        return len(self.keys)
+
+    method slice(&self, start: size, end: size) -> Table:
+        mut out: Table = Table([], [])
+        mut i: size = start
+        while i < end and i < len(self.keys):
+            out.keys.push(f"{self.keys[i]}")
+            out.values.push(self.values[i])
+            i += 1
+        return out
+
+manual fn run():
+    mut t: Table = Table([], [])
+    t["a"] = 1
+    t["b"] = 2
+    t["a"] += 10
+    const k: str = "b"
+    print(f"{t["a"]} {t[k]} {len(t)} {"a" in t} {"z" not in t}")
+    const part: Table = t[1:]
+    const first: Table = t[:1]
+    print(f"{len(part)} {part["b"]} {len(first)} {first["a"]}")
+
+managed fn twice():
+    t = Table([], [])
+    t["x"] = 5
+    t["x"] *= 2
+    print(f"{t["x"]} {"x" in t} {len(t)}")
+
+managed fn main():
+    run()
+    twice()
+# expect: 11 2 2 True True
+# expect: 1 2 1 11
+# expect: 10 True 1
