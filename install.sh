@@ -22,6 +22,16 @@ if ! command -v cargo >/dev/null 2>&1; then
     [ -x "$HOME/.cargo/bin/cargo" ] && PATH="$HOME/.cargo/bin:$PATH"
 fi
 command -v cargo >/dev/null 2>&1 || fail "Rust is needed to build hsy: install it from https://rustup.rs, then run this script again"
+# The oldest Rust that builds hsy, as `rust-version` in Cargo.toml says.
+NEED_MINOR=88
+have=$(rustc --version 2>/dev/null | cut -d' ' -f2)
+minor=$(printf '%s' "$have" | cut -d. -f2)
+if [ "$(printf '%s' "$have" | cut -d. -f1)" = 1 ] && [ "${minor:-0}" -lt "$NEED_MINOR" ]; then
+    if command -v rustup >/dev/null 2>&1; then
+        fail "Rust $have is too old: hsy needs 1.$NEED_MINOR or later. Run \`rustup update stable\`, then this script again"
+    fi
+    fail "Rust $have is too old: hsy needs 1.$NEED_MINOR or later. Update Rust, then run this script again"
+fi
 if ! command -v cc >/dev/null 2>&1 && ! command -v gcc >/dev/null 2>&1 && ! command -v clang >/dev/null 2>&1; then
     case "$(uname -s)" in
         Darwin) fail "a C compiler is needed: run \`xcode-select --install\`, then this script again" ;;

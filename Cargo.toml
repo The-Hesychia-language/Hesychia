@@ -2,6 +2,8 @@
 name = "hesychia"
 version = "0.1.0"
 edition = "2024"
+# The oldest Rust that builds hsy: `let` chains came in 1.88.
+rust-version = "1.88"
 description = "Compiler for the Hesychia programming language"
 license = "MIT"
 

@@ -59,8 +59,8 @@ impl Checker<'_> {
                 Some(Place { whole: false, text: format!("{}.{name}", base.text), ..base })
             }
             // `c[k]` through `Index`, `c.index(&k)[0]`: a part of `c`, as writable as `c` is.
-            ExprKind::Index { base, .. } if let Some(container) = indexed(base) => {
-                let base = self.place_of(container)?;
+            ExprKind::Index { base, .. } if indexed(base).is_some() => {
+                let base = self.place_of(indexed(base)?)?;
                 Some(Place { whole: false, text: format!("{}[...]", base.text), ..base })
             }
             // What a pointer points to can always be written, unchecked.

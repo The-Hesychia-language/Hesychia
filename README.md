@@ -291,7 +291,7 @@ Only the selected branch of a `comptime if` is type-checked. `target` describes 
 
 ## Install
 
-Hesychia needs `git`, [Rust](https://rustup.rs) to build the compiler, and a C compiler (`xcode-select --install` on macOS, `build-essential` on Debian and Ubuntu) to build programs.
+Hesychia needs `git`, [Rust](https://rustup.rs) 1.88 or later to build the compiler (`rustup update stable` brings an older one up to date), and a C compiler (`xcode-select --install` on macOS, `build-essential` on Debian and Ubuntu) to build programs.
 
 ```sh
 curl -fsSLO https://raw.githubusercontent.com/The-Hesychia-language/Hesychia/main/install.sh
