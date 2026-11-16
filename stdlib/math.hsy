@@ -1,0 +1,72 @@
+# math: functions of real numbers, from the C library.
+
+comptime pi: f64 = 3.141592653589793
+comptime e: f64 = 2.718281828459045
+comptime inf: f64 = 1e309
+comptime nan: f64 = inf - inf
+
+@symbol("sqrt")
+priv extern fn c_sqrt(x: f64) -> f64
+@symbol("floor")
+priv extern fn c_floor(x: f64) -> f64
+@symbol("ceil")
+priv extern fn c_ceil(x: f64) -> f64
+@symbol("round")
+priv extern fn c_round(x: f64) -> f64
+@symbol("sin")
+priv extern fn c_sin(x: f64) -> f64
+@symbol("cos")
+priv extern fn c_cos(x: f64) -> f64
+@symbol("tan")
+priv extern fn c_tan(x: f64) -> f64
+@symbol("atan2")
+priv extern fn c_atan2(y: f64, x: f64) -> f64
+@symbol("log")
+priv extern fn c_log(x: f64) -> f64
+@symbol("exp")
+priv extern fn c_exp(x: f64) -> f64
+
+manual fn sqrt(x: f64) -> f64:
+    return c_sqrt(x)
+
+manual fn floor(x: f64) -> f64:
+    return c_floor(x)
+
+manual fn ceil(x: f64) -> f64:
+    return c_ceil(x)
+
+# Halves away from zero: `round(2.5)` is 3.
+manual fn round(x: f64) -> f64:
+    return c_round(x)
+
+# The distance to zero, of an integer or a real number.
+manual fn abs[T: Order + Sub](owned x: T) -> T:
+    const zero: T = x - x
+    if x < zero:
+        return zero - x
+    return x
+
+manual fn sin(x: f64) -> f64:
+    return c_sin(x)
+
+manual fn cos(x: f64) -> f64:
+    return c_cos(x)
+
+manual fn tan(x: f64) -> f64:
+    return c_tan(x)
+
+# The angle of the point (x, y), from -pi to pi.
+manual fn atan2(y: f64, x: f64) -> f64:
+    return c_atan2(y, x)
+
+# The logarithm in `base`, natural by default: `log(x)`, `log(x, base=10)`.
+manual fn log(x: f64, base: f64 = e) -> f64:
+    if base == e:
+        return c_log(x)
+    return c_log(x) / c_log(base)
+
+manual fn exp(x: f64) -> f64:
+    return c_exp(x)
+
+manual fn is_nan(x: f64) -> bool:
+    return x != x

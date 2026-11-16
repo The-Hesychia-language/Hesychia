@@ -1,0 +1,162 @@
+# io: text and bytes, on the terminal and in files.
+# `print(text, end="\n", to=stdout)` is provided by the compiler.
+
+@symbol("fwrite")
+priv extern fn c_fwrite(data: ptr[u8], item: size, count: size, stream: ptr[u8]) -> size
+@symbol("fread")
+priv extern fn c_fread(data: ptr[u8], item: size, count: size, stream: ptr[u8]) -> size
+@symbol("fflush")
+priv extern fn c_fflush(stream: ptr[u8]) -> i32
+@symbol("fgetc")
+priv extern fn c_fgetc(stream: ptr[u8]) -> i32
+@symbol("ferror")
+priv extern fn c_ferror(stream: ptr[u8]) -> i32
+@symbol("fclose")
+priv extern fn c_fclose(stream: ptr[u8]) -> i32
+@symbol("fileno")
+priv extern fn c_fileno(stream: ptr[u8]) -> i32
+@symbol("write")
+priv extern fn c_write(fd: i32, data: ptr[u8], count: size) -> offset
+@symbol("read")
+priv extern fn c_read(fd: i32, data: ptr[u8], count: size) -> offset
+@symbol("write")
+priv extern fn win_write(fd: i32, data: ptr[u8], count: u32) -> i32
+@symbol("read")
+priv extern fn win_read(fd: i32, data: ptr[u8], count: u32) -> i32
+@symbol("hsy_stream")
+priv extern fn stream(which: i32) -> ptr[u8]
+@symbol("hsy_error_text")
+priv extern fn error_text() -> ptr[u8]
+
+# A file or stream that could not be read or written.
+manual struct IoError:
+    path: str
+    reason: str
+
+# An open file or standard stream. A file is closed at the end of its scope, or by `close`.
+manual struct File(Drop):
+    priv handle: ptr[u8]
+    priv path: str
+    # Standard streams stay open.
+    priv closes: bool
+
+    method drop(&mut self):
+        if self.closes:
+            c_fclose(self.handle)
+
+const stdin: File = File(handle=stream(0), path="<stdin>", closes=False)
+const stdout: File = File(handle=stream(1), path="<stdout>", closes=False)
+const stderr: File = File(handle=stream(2), path="<stderr>", closes=False)
+
+# A file `fs.open` has opened: closed when it is dropped.
+manual fn from_handle(handle: ptr[u8], path: &str) -> File:
+    return File(handle=handle, path=f"{path}", closes=True)
+
+priv manual fn failure(f: &File) -> IoError:
+    return IoError(path=f"{f.path}", reason=str.from_c(error_text()))
+
+priv manual fn text_of(f: &File, bytes: &vector[u8]) -> str raises IoError:
+    const text: Optional[str] = str.from_bytes(bytes)
+    if text is None:
+        raise IoError(path=f"{f.path}", reason="not UTF-8 text")
+    return text
+
+# The text up to `end`, which is left out; with `end=""`, all that is left. `None` when
+# nothing is left. A line read up to "\n" also loses a "\r" before it.
+manual fn read(f: &File, end: &str = "\n") -> Optional[str] raises IoError:
+    mut bytes: vector[u8] = []
+    if byte_len(end) == 0:
+        mut chunk: vector[u8] = []
+        for _ in range(4096):
+            chunk.push(0)
+        mut count: size = c_fread(ptr(&chunk[0]), 1, 4096, f.handle)
+        while count > 0:
+            for i in range(count):
+                bytes.push(chunk[i])
+            count = c_fread(ptr(&chunk[0]), 1, 4096, f.handle)
+        if c_ferror(f.handle) != 0:
+            raise failure(f)
+        if len(bytes) == 0:
+            return None
+        return check text_of(f, &bytes)
+    const last: u8 = end.byte(byte_len(end) - 1)
+    mut c: i32 = c_fgetc(f.handle)
+    if c < 0:
+        if c_ferror(f.handle) != 0:
+            raise failure(f)
+        return None
+    mut found: bool = False
+    while c >= 0 and not found:
+        bytes.push(u8(c))
+        if u8(c) == last and len(bytes) >= byte_len(end):
+            found = True
+            const start: size = len(bytes) - byte_len(end)
+            for i in range(byte_len(end)):
+                if bytes[start + i] != end.byte(i):
+                    found = False
+        if not found:
+            c = c_fgetc(f.handle)
+    if found:
+        for _ in range(byte_len(end)):
+            bytes.pop()
+        if end == "\n" and len(bytes) > 0 and bytes[len(bytes) - 1] == 13:
+            bytes.pop()
+    return check text_of(f, &bytes)
+
+# Writes `prompt`, then reads a line; the input having ended is an error.
+manual fn input(prompt: &str = "") -> str raises IoError:
+    c_fwrite(prompt.to_c(), 1, byte_len(prompt), stdout.handle)
+    c_fflush(stdout.handle)
+    const line: Optional[str] = check read(&stdin)
+    if line is None:
+        raise IoError(path="<stdin>", reason="the input has ended")
+    return line
+
+# Sends what `print` has kept in its buffer.
+manual fn flush(f: &File) raises IoError:
+    if c_fflush(f.handle) != 0:
+        raise failure(f)
+
+# Closes `f` now rather than at the end of its scope.
+manual fn close(owned _f: File):
+    pass
+
+# Writes `bytes` in one system call, with no buffer, and gives how many were written: a
+# pipe or a socket may take fewer. `flush` first to keep the order of `print`'s text.
+manual fn sys_write(f: &File, bytes: &vector[u8]) -> size raises IoError:
+    if len(bytes) == 0:
+        return 0
+    const fd: i32 = c_fileno(f.handle)
+    comptime if target.os == "windows":
+        const written: i32 = win_write(fd, ptr(&bytes[0]), u32(len(bytes)))
+        if written < 0:
+            raise failure(f)
+        return size(written)
+    else:
+        const written: offset = c_write(fd, ptr(&bytes[0]), len(bytes))
+        if written < 0:
+            raise failure(f)
+        return size(written)
+
+# At most `count` bytes, in one system call, unchecked; empty at the end.
+manual fn sys_read(f: &File, count: size) -> vector[u8] raises IoError:
+    mut bytes: vector[u8] = []
+    if count == 0:
+        return bytes
+    for _ in range(count):
+        bytes.push(0)
+    const fd: i32 = c_fileno(f.handle)
+    mut got: size = 0
+    comptime if target.os == "windows":
+        const n: i32 = win_read(fd, ptr(&bytes[0]), u32(count))
+        if n < 0:
+            raise failure(f)
+        got = size(n)
+    else:
+        const n: offset = c_read(fd, ptr(&bytes[0]), count)
+        if n < 0:
+            raise failure(f)
+        got = size(n)
+    while len(bytes) > got:
+        bytes.pop()
+    return bytes

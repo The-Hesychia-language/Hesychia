@@ -1,0 +1,151 @@
+# fs: files and folders, named by their path.
+
+from io import File, IoError, from_handle
+
+@symbol("fopen")
+priv extern fn c_fopen(path: ptr[u8], mode: ptr[u8]) -> Optional[ptr[u8]]
+@symbol("remove")
+priv extern fn c_remove(path: ptr[u8]) -> i32
+@symbol("rmdir")
+priv extern fn c_rmdir(path: ptr[u8]) -> i32
+@symbol("rename")
+priv extern fn c_rename(old: ptr[u8], new: ptr[u8]) -> i32
+@symbol("access")
+priv extern fn c_access(path: ptr[u8], mode: i32) -> i32
+@symbol("mkdir")
+priv extern fn c_mkdir(path: ptr[u8], mode: u32) -> i32
+@symbol("mkdir")
+priv extern fn win_mkdir(path: ptr[u8]) -> i32
+@symbol("opendir")
+priv extern fn c_opendir(path: ptr[u8]) -> Optional[ptr[u8]]
+@symbol("readdir")
+priv extern fn c_readdir(folder: ptr[u8]) -> Optional[ptr[u8]]
+@symbol("closedir")
+priv extern fn c_closedir(folder: ptr[u8]) -> i32
+@symbol("hsy_path_kind")
+priv extern fn path_kind(path: ptr[u8]) -> i32
+@symbol("hsy_error_text")
+priv extern fn error_text() -> ptr[u8]
+
+# What `kind` tests a path for.
+manual enum Kind:
+    File
+    Dir
+    Link
+
+priv manual fn failure(path: &str) -> IoError:
+    return IoError(path=f"{path}", reason=str.from_c(error_text()))
+
+# How `open` opens a file: to read, to write from empty, or to add at the end.
+manual enum Mode:
+    Read
+    Write
+    Append
+
+# Text is written with `print(..., to=f)` and read with `io.read(f)`.
+manual fn open(path: &str, mode: Mode = Mode.Read) -> File raises IoError:
+    # Binary mode keeps line breaks as they are on every system.
+    mut flags: str = "rb"
+    match mode:
+        case Mode.Read:
+            pass
+        case Mode.Write:
+            flags = "wb"
+        case Mode.Append:
+            flags = "ab"
+    const handle: Optional[ptr[u8]] = c_fopen(path.to_c(), flags.to_c())
+    if handle is None:
+        raise failure(path)
+    return from_handle(handle, path)
+
+manual fn exists(path: &str) -> bool:
+    return c_access(path.to_c(), 0) == 0
+
+# Whether `path` is a file, a folder or a link: `fs.kind(path, fs.Kind.Dir)`.
+manual fn kind(path: &str, wanted: Kind) -> bool:
+    const found: i32 = path_kind(path.to_c())
+    match wanted:
+        case Kind.File:
+            return found == 1
+        case Kind.Dir:
+            return found == 2
+        case Kind.Link:
+            return found == 3
+
+# Whether the name of `path` ends with `.ext`; `ext` is written without the point, as "csv".
+manual fn extension(path: &str, ext: &str) -> bool:
+    const n: size = byte_len(path)
+    const m: size = byte_len(ext)
+    if m == 0 or n < m + 2:
+        return False
+    if path.byte(n - m - 1) != 46:
+        return False
+    for i in range(m):
+        mut a: u8 = path.byte(n - m + i)
+        mut b: u8 = ext.byte(i)
+        if a >= 65 and a <= 90:
+            a += 32
+        if b >= 65 and b <= 90:
+            b += 32
+        if a != b:
+            return False
+    # Not a hidden file such as ".csv" alone.
+    const before: u8 = path.byte(n - m - 2)
+    return before != 47 and before != 92
+
+# Where the name sits in a C `struct dirent`.
+priv manual fn name_offset() -> size:
+    comptime if target.os == "macos":
+        return 21
+    elif target.os == "windows":
+        return 8
+    else:
+        return 19
+
+# The paths of what a folder holds, without `.` and `..`, in no set order:
+# `list_dir("data")` gives "data/sales.csv".
+manual fn list_dir(path: &str) -> vector[str] raises IoError:
+    const folder: Optional[ptr[u8]] = c_opendir(path.to_c())
+    if folder is None:
+        raise failure(path)
+    mut prefix: str = f"{path}"
+    if not prefix.ends_with("/") and not prefix.ends_with("\\"):
+        prefix += "/"
+    mut paths: vector[str] = []
+    mut done: bool = False
+    while not done:
+        const entry: Optional[ptr[u8]] = c_readdir(folder)
+        if entry is None:
+            done = True
+        else:
+            const name: str = str.from_c(entry + name_offset())
+            if name != "." and name != "..":
+                paths.push(f"{prefix}{name}")
+    c_closedir(folder)
+    return paths
+
+manual fn make_dir(path: &str) raises IoError:
+    comptime if target.os == "windows":
+        if win_mkdir(path.to_c()) != 0:
+            raise failure(path)
+    else:
+        if c_mkdir(path.to_c(), 493) != 0:
+            raise failure(path)
+
+# Renames or moves `old` to `new`.
+manual fn rename(old: &str, new: &str) raises IoError:
+    if c_rename(old.to_c(), new.to_c()) != 0:
+        raise failure(old)
+
+# A file, or an empty folder; with `recursive=True`, a folder and all it holds.
+manual fn remove(path: &str, recursive: bool = False) raises IoError:
+    const folder: bool = kind(path, Kind.Dir)
+    if recursive and folder:
+        for inner in check list_dir(path):
+            check remove(&inner, True)
+    # Windows' `remove` takes files only.
+    if folder:
+        if c_rmdir(path.to_c()) != 0:
+            raise failure(path)
+    elif c_remove(path.to_c()) != 0:
+        raise failure(path)

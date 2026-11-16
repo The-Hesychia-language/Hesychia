@@ -1,0 +1,716 @@
+# The prelude: loaded with every program, its public names need no import.
+# Positions in a `str` count characters, as `len` does.
+
+extern fn atof(text: ptr[u8]) -> f64
+
+# A text that is not a number: `i64("4x")`.
+manual struct ParseError:
+    text: str
+
+# --- text --------------------------------------------------------------------
+
+priv manual fn is_space(b: u8) -> bool:
+    return b == 32 or (b >= 9 and b <= 13)
+
+priv manual fn is_digit(b: u8) -> bool:
+    return b >= 48 and b <= 57
+
+# Whether the byte at `i` starts a character.
+priv manual fn starts_char(text: &str, i: size) -> bool:
+    return (text.byte(i) & 192) != 128
+
+# The byte where character `n` starts, or the length past the last one.
+priv manual fn byte_of(text: &str, n: size) -> size:
+    mut count: size = 0
+    for i in range(byte_len(text)):
+        if starts_char(text, i):
+            if count == n:
+                return i
+            count += 1
+    return byte_len(text)
+
+# The character that starts at byte `i`.
+priv manual fn char_of(text: &str, i: size) -> size:
+    mut count: size = 0
+    for b in range(i):
+        if starts_char(text, b):
+            count += 1
+    return count
+
+# Bytes cut from valid text where characters start, or changed only in ASCII, are valid text.
+priv manual fn text_of(bytes: &vector[u8]) -> str:
+    const text: Optional[str] = str.from_bytes(bytes)
+    if text is None:
+        panic("not UTF-8 text")
+    return text
+
+priv manual fn bytes_of(text: &str, start: size, end: size) -> str:
+    mut out: vector[u8] = []
+    for i in range(start, end):
+        out.push(text.byte(i))
+    return text_of(&out)
+
+# The byte where `part` first appears at or after byte `after`.
+priv manual fn byte_find(text: &str, part: &str, after: size) -> Optional[size]:
+    if byte_len(part) > byte_len(text):
+        return None
+    for start in range(after, byte_len(text) - byte_len(part) + 1):
+        mut same: bool = True
+        for i in range(byte_len(part)):
+            if text.byte(start + i) != part.byte(i):
+                same = False
+                break
+        if same:
+            return start
+    return None
+
+priv manual fn ascii_case(text: &str, low: u8, high: u8) -> str:
+    mut out: vector[u8] = []
+    for i in range(byte_len(text)):
+        const b: u8 = text.byte(i)
+        if b >= low and b <= high:
+            out.push(b ^ 32)
+        else:
+            out.push(b)
+    return text_of(&out)
+
+# Which side of a text `strip` works on.
+manual enum Side:
+    Both
+    Start
+    End
+
+extend str:
+    method starts_with(&self, prefix: &str) -> bool:
+        if byte_len(prefix) > byte_len(self):
+            return False
+        for i in range(byte_len(prefix)):
+            if self.byte(i) != prefix.byte(i):
+                return False
+        return True
+
+    method ends_with(&self, suffix: &str) -> bool:
+        if byte_len(suffix) > byte_len(self):
+            return False
+        const start: size = byte_len(self) - byte_len(suffix)
+        for i in range(byte_len(suffix)):
+            if self.byte(start + i) != suffix.byte(i):
+                return False
+        return True
+
+    # `part in s`.
+    method contains(&self, part: &str) -> bool:
+        return byte_find(self, part, 0) is not None
+
+    # The position of the first `part`.
+    method find(&self, part: &str) -> Optional[size]:
+        const at: Optional[size] = byte_find(self, part, 0)
+        if at is None:
+            return None
+        return char_of(self, at)
+
+    # `s[start:end]`, by characters.
+    method slice(&self, start: size, end: size) -> str:
+        const first: size = byte_of(self, start)
+        if end <= start:
+            return ""
+        return bytes_of(self, first, byte_of(self, end))
+
+    # Without the spaces, tabs and line breaks around it; `side=Side.Start` or
+    # `side=Side.End` strips one side only.
+    method strip(&self, side: Side = Side.Both) -> str:
+        mut start: size = 0
+        mut end: size = byte_len(self)
+        match side:
+            case Side.End:
+                pass
+            case _:
+                while start < end and is_space(self.byte(start)):
+                    start += 1
+        match side:
+            case Side.Start:
+                pass
+            case _:
+                while end > start and is_space(self.byte(end - 1)):
+                    end -= 1
+        return bytes_of(self, start, end)
+
+    # The parts between each `sep`; with no `sep`, the words between runs of spaces.
+    method split(&self, sep: &str = "") -> vector[str]:
+        mut parts: vector[str] = []
+        if byte_len(sep) == 0:
+            mut i: size = 0
+            while i < byte_len(self):
+                while i < byte_len(self) and is_space(self.byte(i)):
+                    i += 1
+                const start: size = i
+                while i < byte_len(self) and not is_space(self.byte(i)):
+                    i += 1
+                if i > start:
+                    parts.push(bytes_of(self, start, i))
+            return parts
+        mut start: size = 0
+        mut done: bool = False
+        while not done:
+            const at: Optional[size] = byte_find(self, sep, start)
+            if at is None:
+                done = True
+            else:
+                parts.push(bytes_of(self, start, at))
+                start = at + byte_len(sep)
+        parts.push(bytes_of(self, start, byte_len(self)))
+        return parts
+
+    method replace(&self, old: &str, new: &str) -> str:
+        if byte_len(old) == 0:
+            return bytes_of(self, 0, byte_len(self))
+        mut out: str = ""
+        mut start: size = 0
+        mut done: bool = False
+        while not done:
+            const at: Optional[size] = byte_find(self, old, start)
+            if at is None:
+                done = True
+            else:
+                out += bytes_of(self, start, at)
+                out += new
+                start = at + byte_len(old)
+        out += bytes_of(self, start, byte_len(self))
+        return out
+
+    # ASCII letters only.
+    method upper(&self) -> str:
+        return ascii_case(self, 97, 122)
+
+    method lower(&self) -> str:
+        return ascii_case(self, 65, 90)
+
+    # `", ".join(words)`.
+    method join(&self, parts: &vector[str]) -> str:
+        mut out: str = ""
+        for i in range(len(parts)):
+            if i > 0:
+                out += self
+            out += parts[i]
+        return out
+
+# --- numbers from text ---------------------------------------------------------
+
+# The sign and digits of an integer, spaces around it allowed.
+priv manual fn digits_of(text: &str, high: u128) -> (bool, u128) raises ParseError:
+    const trimmed: str = text.strip()
+    mut i: size = 0
+    const negative: bool = byte_len(trimmed) > 0 and trimmed.byte(0) == 45
+    if byte_len(trimmed) > 0 and (trimmed.byte(0) == 45 or trimmed.byte(0) == 43):
+        i = 1
+    if i == byte_len(trimmed):
+        raise ParseError(f"{text}")
+    mut value: u128 = 0
+    while i < byte_len(trimmed):
+        const b: u8 = trimmed.byte(i)
+        if not is_digit(b):
+            raise ParseError(f"{text}")
+        const digit: u128 = u128(b - 48)
+        if value > (high - digit) // 10:
+            raise ParseError(f"{text}")
+        value = value * 10 + digit
+        i += 1
+    return (negative, value)
+
+# A signed integer of `bits` bits.
+priv manual fn parse_signed(text: &str, bits: u32) -> i128 raises ParseError:
+    const most: u128 = u128(1) << u128(bits - 1)
+    const (negative, value): (bool, u128) = check digits_of(text, most)
+    if not negative:
+        if value == most:
+            raise ParseError(f"{text}")
+        return i128(value)
+    if value == most:
+        return -i128(most - 1) - 1
+    return -i128(value)
+
+priv manual fn parse_unsigned(text: &str, bits: u32) -> u128 raises ParseError:
+    mut high: u128 = ~u128(0)
+    if bits < 128:
+        high = (u128(1) << u128(bits)) - 1
+    const (negative, value): (bool, u128) = check digits_of(text, high)
+    if negative and value != 0:
+        raise ParseError(f"{text}")
+    return value
+
+priv manual fn parse_i8(text: &str) -> i8 raises ParseError:
+    return i8(check parse_signed(text, 8))
+
+priv manual fn parse_i16(text: &str) -> i16 raises ParseError:
+    return i16(check parse_signed(text, 16))
+
+priv manual fn parse_i32(text: &str) -> i32 raises ParseError:
+    return i32(check parse_signed(text, 32))
+
+priv manual fn parse_i64(text: &str) -> i64 raises ParseError:
+    return i64(check parse_signed(text, 64))
+
+priv manual fn parse_i128(text: &str) -> i128 raises ParseError:
+    return check parse_signed(text, 128)
+
+priv manual fn parse_offset(text: &str) -> offset raises ParseError:
+    return offset(check parse_signed(text, 64))
+
+priv manual fn parse_u8(text: &str) -> u8 raises ParseError:
+    return u8(check parse_unsigned(text, 8))
+
+priv manual fn parse_u16(text: &str) -> u16 raises ParseError:
+    return u16(check parse_unsigned(text, 16))
+
+priv manual fn parse_u32(text: &str) -> u32 raises ParseError:
+    return u32(check parse_unsigned(text, 32))
+
+priv manual fn parse_u64(text: &str) -> u64 raises ParseError:
+    return u64(check parse_unsigned(text, 64))
+
+priv manual fn parse_u128(text: &str) -> u128 raises ParseError:
+    return check parse_unsigned(text, 128)
+
+priv manual fn parse_size(text: &str) -> size raises ParseError:
+    return size(check parse_unsigned(text, 64))
+
+# `[+-]digits[.digits][(e|E)[+-]digits]`, spaces around it allowed.
+priv manual fn parse_f64(text: &str) -> f64 raises ParseError:
+    const trimmed: str = text.strip()
+    const n: size = byte_len(trimmed)
+    mut i: size = 0
+    if i < n and (trimmed.byte(i) == 45 or trimmed.byte(i) == 43):
+        i += 1
+    mut digits: size = 0
+    while i < n and is_digit(trimmed.byte(i)):
+        i += 1
+        digits += 1
+    if i < n and trimmed.byte(i) == 46:
+        i += 1
+        while i < n and is_digit(trimmed.byte(i)):
+            i += 1
+            digits += 1
+    if digits == 0:
+        raise ParseError(f"{text}")
+    if i < n and (trimmed.byte(i) == 101 or trimmed.byte(i) == 69):
+        i += 1
+        if i < n and (trimmed.byte(i) == 45 or trimmed.byte(i) == 43):
+            i += 1
+        const start: size = i
+        while i < n and is_digit(trimmed.byte(i)):
+            i += 1
+        if i == start:
+            raise ParseError(f"{text}")
+    if i != n:
+        raise ParseError(f"{text}")
+    return atof(trimmed.to_c())
+
+priv manual fn parse_f32(text: &str) -> f32 raises ParseError:
+    return f32(check parse_f64(text))
+
+# --- vectors -------------------------------------------------------------------
+
+extend vector[T: Equal]:
+    # `item in v`.
+    method contains(&self, item: &T) -> bool:
+        return self.find(item) is not None
+
+    # The position of the first `item`.
+    method find(&self, item: &T) -> Optional[size]:
+        for i in range(len(self)):
+            if self[i] == item:
+                return i
+        return None
+
+    method count(&self, item: &T) -> size:
+        mut found: size = 0
+        for i in range(len(self)):
+            if self[i] == item:
+                found += 1
+        return found
+
+extend vector[T]:
+    method reverse(&mut self):
+        const n: size = len(self)
+        for i in range(n // 2):
+            self.swap(i, n - 1 - i)
+
+    # Moves the items of `other` to the end.
+    method extend(&mut self, owned other: vector[T]):
+        for item in other:
+            self.push(item)
+
+    # `v[start:end]`: a copy of those items.
+    method slice(&self, start: size, end: size) -> vector[T]:
+        mut out: vector[T] = []
+        mut i: size = start
+        while i < end and i < len(self):
+            out.push(self[i].copy())
+            i += 1
+        return out
+
+# The positions of `values` in sorted order: a bottom-up merge sort, stable.
+priv manual fn sort_order[T: Order](values: &vector[T]) -> vector[size]:
+    const n: size = len(values)
+    mut order: vector[size] = []
+    mut merged: vector[size] = []
+    for i in range(n):
+        order.push(i)
+        merged.push(i)
+    mut width: size = 1
+    while width < n:
+        mut start: size = 0
+        while start < n:
+            const middle: size = min(&(start + width), n)
+            const end: size = min(&(start + 2 * width), n)
+            mut left: size = start
+            mut right: size = middle
+            for k in range(start, end):
+                if left < middle and (right >= end or not (values[order[right]] < values[order[left]])):
+                    merged[k] = order[left]
+                    left += 1
+                else:
+                    merged[k] = order[right]
+                    right += 1
+            start += 2 * width
+        for k in range(n):
+            order[k] = merged[k]
+        width *= 2
+    return order
+
+extend vector[T: Order]:
+    # Smallest first; equal items keep their order.
+    method sort(&mut self):
+        const order: vector[size] = sort_order(self)
+        # Item `k` comes from `order[k]`, which earlier swaps may have moved further.
+        for k in range(len(self)):
+            mut source: size = order[k]
+            while source < k:
+                source = order[source]
+            self.swap(k, source)
+
+# A value inside a collection, where text is quoted: `'a'`, as in `['a']`.
+priv manual fn shown[T](x: &T) -> str:
+    comptime if T == str or T == char:
+        return f"'{x}'"
+    else:
+        return f"{x}"
+
+# --- formats of f-strings ----
+
+@symbol("hsy_format_float")
+priv extern fn c_format_float(x: f64, precision: i32, exponent: bool) -> ptr[u8]
+
+# The digits of `n` in `base`, letters in capitals with `upper`.
+priv manual fn digits_text(n: u128, base: u128, upper: bool) -> str:
+    mut bytes: vector[u8] = []
+    mut left: u128 = n
+    while left > 0 or len(bytes) == 0:
+        const digit: u8 = u8(left % base)
+        if digit < 10:
+            bytes.push(48 + digit)
+        elif upper:
+            bytes.push(55 + digit)
+        else:
+            bytes.push(87 + digit)
+        left = left // base
+    bytes.reverse()
+    return text_of(&bytes)
+
+# `1234567.5` as `1,234,567.5`.
+priv manual fn grouped(digits: &str) -> str:
+    mut whole: size = 0
+    while whole < byte_len(digits) and is_digit(digits.byte(whole)):
+        whole += 1
+    mut bytes: vector[u8] = []
+    mut i: size = 0
+    while i < byte_len(digits):
+        if i > 0 and i < whole and (whole - i) % 3 == 0:
+            bytes.push(44)
+        bytes.push(digits.byte(i))
+        i += 1
+    return text_of(&bytes)
+
+priv manual fn repeated(fill: char, count: size) -> str:
+    mut out: str = ""
+    mut i: size = 0
+    while i < count:
+        out += f"{fill}"
+        i += 1
+    return out
+
+# A float that is not negative, to `precision` digits; `kind` is `f`, `e`, `%` or none.
+priv manual fn float_text(x: f64, precision: i32, kind: char) -> str:
+    if kind == ' ' and precision < 0:
+        return f"{x}"
+    mut digits: i32 = precision
+    if digits < 0:
+        digits = 6
+    if kind == '%':
+        return f"{str.from_c(c_format_float(x * 100.0, digits, False))}%"
+    return str.from_c(c_format_float(x, digits, kind == 'e'))
+
+# What `{x:spec}` writes: the compiler has read the format and checked it against `T`.
+priv manual fn formatted[T](x: &T, fill: char, align: char, plus: bool, zero: bool, width: size, comma: bool, precision: i32, kind: char) -> str:
+    mut sign: str = ""
+    mut body: str = ""
+    mut number: bool = True
+    comptime if T == f32 or T == f64:
+        mut value: f64 = f64(x.copy())
+        if value < 0.0:
+            sign = "-"
+            value = -value
+        body = float_text(value, precision, kind)
+    elif T == i8 or T == i16 or T == i32 or T == i64 or T == i128 or T == offset:
+        const value: i128 = i128(x.copy())
+        mut size_of_it: u128 = 0
+        if value < 0:
+            sign = "-"
+            size_of_it = u128(-(value + 1)) + 1
+        else:
+            size_of_it = u128(value)
+        body = integer_text(size_of_it, precision, kind)
+    elif T == u8 or T == u16 or T == u32 or T == u64 or T == u128 or T == size:
+        body = integer_text(u128(x.copy()), precision, kind)
+    else:
+        number = False
+        body = f"{x}"
+    if plus and len(sign) == 0:
+        sign = "+"
+    if comma:
+        body = grouped(&body)
+    const total: size = len(sign) + len(body)
+    if width <= total:
+        return f"{sign}{body}"
+    const pad: size = width - total
+    if zero and align == ' ':
+        return f"{sign}{repeated('0', pad)}{body}"
+    if align == '<' or (align == ' ' and not number):
+        return f"{sign}{body}{repeated(fill, pad)}"
+    if align == '^':
+        const left: size = pad // 2
+        return f"{repeated(fill, left)}{sign}{body}{repeated(fill, pad - left)}"
+    return f"{repeated(fill, pad)}{sign}{body}"
+
+# An integer that is not negative, as `kind` asks: in a base, or as a float.
+priv manual fn integer_text(n: u128, precision: i32, kind: char) -> str:
+    if kind == 'f' or kind == 'e' or kind == '%':
+        return float_text(f64(n), precision, kind)
+    if kind == 'x':
+        return digits_text(n, 16, False)
+    if kind == 'X':
+        return digits_text(n, 16, True)
+    if kind == 'b':
+        return digits_text(n, 2, False)
+    if kind == 'o':
+        return digits_text(n, 8, False)
+    return digits_text(n, 10, False)
+
+# --- functions -------------------------------------------------------------------
+
+# What `min` and `max` give: one of two values, or an item of a vector, `None` when it is empty.
+priv comptime fn picked(T: type) -> type:
+    if T == vector:
+        return Optional[item(T)]
+    return T
+
+# The smaller of two values, `min(a, b)`, or the smallest item of a vector, `min(v)`.
+manual fn min[T](a: &T, owned b: Optional[T] = None) -> picked(T):
+    return pick(a, b, True)
+
+# The larger of two values, `max(a, b)`, or the largest item of a vector, `max(v)`.
+manual fn max[T](a: &T, owned b: Optional[T] = None) -> picked(T):
+    return pick(a, b, False)
+
+# The first of the smallest, or of the largest.
+priv manual fn pick[T](a: &T, owned b: Optional[T], least: bool) -> picked(T):
+    comptime if T == vector:
+        if b is not None:
+            panic("min and max take two values, or one vector")
+        if len(a) == 0:
+            return None
+        mut best: size = 0
+        for i in range(1, len(a)):
+            if (least and a[i] < a[best]) or (not least and a[best] < a[i]):
+                best = i
+        return a[best].copy()
+    else:
+        if b is None:
+            panic("min and max take two values, or one vector")
+        if (least and b < a) or (not least and a < b):
+            return b
+        return a.copy()
+
+# The total of `values`, added to `start`: `sum(prices)`, `sum(names, "")`.
+manual fn sum[T: Add](values: &vector[T], owned start: T = 0) -> T:
+    mut total: T = start
+    for i in range(len(values)):
+        total = total + values[i]
+    return total
+
+# --- dict and set ---------------------------------------------------------------
+
+# A hash table: `d = dict[str, i32]()`, `d["a"] = 1`, `d["a"] += 1`, `"a" in d`.
+# Entries keep the order they were added in; a missing key in `d[k]` stops the program,
+# `d.get(k)` gives `None` instead.
+manual struct dict[K: Hash + Equal, V](Index, IndexSet, Contains, Len, Show):
+    priv names: vector[K]
+    priv entries: vector[V]
+    priv hashes: vector[u64]
+    # Open addressing: 0 for an empty slot, else the entry's position plus one.
+    priv slots: vector[size]
+
+    # The slot holding `key`, or the empty slot where it would go.
+    priv method slot_of(&self, key: &K, hash: u64) -> size:
+        const mask: size = len(self.slots) - 1
+        mut at: size = size(hash) & mask
+        while self.slots[at] != 0:
+            const entry: size = self.slots[at] - 1
+            if self.hashes[entry] == hash and self.names[entry] == key:
+                return at
+            at = (at + 1) & mask
+        return at
+
+    priv method entry_of(&self, key: &K) -> Optional[size]:
+        if len(self.slots) == 0:
+            return None
+        const at: size = self.slot_of(key, key.hash())
+        if self.slots[at] == 0:
+            return None
+        return self.slots[at] - 1
+
+    # Lays the entries out again over `count` slots, a power of two.
+    priv method rebuild(&mut self, count: size):
+        self.slots.clear()
+        for _ in range(count):
+            self.slots.push(0)
+        for entry in range(len(self.names)):
+            const at: size = self.slot_of(&self.names[entry], self.hashes[entry])
+            self.slots[at] = entry + 1
+
+    method index(&self, key: &K) -> ptr[V]:
+        const entry: Optional[size] = self.entry_of(key)
+        if entry is None:
+            panic("dict: the key is missing")
+        return ptr(&self.entries[entry])
+
+    method set_index(&mut self, owned key: K, owned value: V):
+        const hash: u64 = key.hash()
+        const found: Optional[size] = self.entry_of(&key)
+        if found is not None:
+            self.entries[found] = value
+            return
+        if (len(self.names) + 1) * 4 > len(self.slots) * 3:
+            self.rebuild(max(&size(8), len(self.slots) * 2))
+        const at: size = self.slot_of(&key, hash)
+        self.slots[at] = len(self.names) + 1
+        self.names.push(key)
+        self.entries.push(value)
+        self.hashes.push(hash)
+
+    method contains(&self, key: &K) -> bool:
+        return self.entry_of(key) is not None
+
+    method len(&self) -> size:
+        return len(self.names)
+
+    # A copy of the value of `key`, if there is one.
+    method get(&self, key: &K) -> Optional[V]:
+        const entry: Optional[size] = self.entry_of(key)
+        if entry is None:
+            return None
+        return self.entries[entry].copy()
+
+    # Takes `key` out, and gives its value back.
+    method remove(&mut self, key: &K) -> Optional[V]:
+        const entry: Optional[size] = self.entry_of(key)
+        if entry is None:
+            return None
+        self.names.remove(entry)
+        self.hashes.remove(entry)
+        const value: V = self.entries.remove(entry)
+        self.rebuild(len(self.slots))
+        return value
+
+    method clear(&mut self):
+        self.names.clear()
+        self.entries.clear()
+        self.hashes.clear()
+        self.slots.clear()
+
+    # Copies, in the order the entries were added.
+    method keys(&self) -> vector[K]:
+        return self.names.copy()
+
+    # `{'a': 1, 'b': 2}`, as Python writes it.
+    method show(&self) -> str:
+        mut out: str = "{"
+        for i in range(len(self.names)):
+            if i > 0:
+                out += ", "
+            out += shown(&self.names[i])
+            out += ": "
+            out += shown(&self.entries[i])
+        out += "}"
+        return out
+
+    method values(&self) -> vector[V]:
+        return self.entries.copy()
+
+    method items(&self) -> vector[(K, V)]:
+        mut out: vector[(K, V)] = []
+        for i in range(len(self.names)):
+            out.push((self.names[i].copy(), self.entries[i].copy()))
+        return out
+
+# Values without repeats: `s = set[str]()`, `s.add("a")`, `"a" in s`.
+manual struct set[T: Hash + Equal](Contains, Len, Show):
+    priv table: dict[T, bool]
+
+    method add(&mut self, owned item: T):
+        self.table[item] = True
+
+    # Whether `item` was there.
+    method remove(&mut self, item: &T) -> bool:
+        return self.table.remove(item) is not None
+
+    method contains(&self, item: &T) -> bool:
+        return item in self.table
+
+    method len(&self) -> size:
+        return len(self.table)
+
+    method clear(&mut self):
+        self.table.clear()
+
+    # `{1, 2}`; an empty set is `set()`, as Python writes it.
+    method show(&self) -> str:
+        const items: vector[T] = self.table.keys()
+        if len(items) == 0:
+            return "set()"
+        mut out: str = "{"
+        for i in range(len(items)):
+            if i > 0:
+                out += ", "
+            out += shown(&items[i])
+        out += "}"
+        return out
+
+    # A copy of the values, in the order they were added.
+    method values(&self) -> vector[T]:
+        return self.table.keys()
+
+    method union(&self, other: &set[T]) -> set[T]:
+        mut out: set[T] = set()
+        for item in self.table.keys():
+            out.add(item)
+        for item in other.table.keys():
+            out.add(item)
+        return out
+
+    method intersection(&self, other: &set[T]) -> set[T]:
+        mut out: set[T] = set()
+        for item in self.table.keys():
+            if item in other:
+                out.add(item)
+        return out

@@ -1,0 +1,13 @@
+[package]
+name = "hesychia"
+version = "0.1.0"
+edition = "2024"
+description = "Compiler for the Hesychia programming language"
+license = "MIT"
+
+[[bin]]
+name = "hsy"
+path = "src/main.rs"
+
+[dependencies]
+toml = { version = "0.8", default-features = false, features = ["parse"] }

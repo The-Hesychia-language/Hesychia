@@ -1,0 +1,151 @@
+# csv: tables of text, one row per line, fields separated by commas (RFC 4180).
+# A field with the separator, a quote or a line break is quoted, and its quotes doubled.
+
+import io
+from io import File, IoError, print, stdout
+
+# Text that is not a well-formed table.
+manual struct CsvError:
+    line: size
+    reason: str
+
+# Bytes cut from valid text at ASCII separators are valid text.
+priv manual fn field_of(bytes: &vector[u8]) -> str:
+    const text: Optional[str] = str.from_bytes(bytes)
+    if text is None:
+        panic("csv: a field is not UTF-8")
+    return text
+
+priv manual fn check_sep(sep: &str) raises CsvError:
+    if byte_len(sep) != 1 or sep == "\"" or sep == "\n" or sep == "\r":
+        raise CsvError(line=0, reason="the separator is one character, not a quote or a line break")
+
+# What `load[R]` gives for each row.
+priv comptime fn row(R: type) -> type:
+    if R == dict:
+        return dict[str, str]
+    if R == vector:
+        return vector[str]
+    panic("csv: load each row as a `vector` or a `dict`")
+
+# The rows of the file. `load[vector](f)` gives each as a vector of fields; `load[dict](f)` gives
+# each row after the first as a dict from the first row's names to its fields. `sep` is one
+# character such as "," or ";".
+manual fn load[R](f: &File, sep: &str = ",") -> vector[row(R)] raises CsvError | IoError:
+    const text: Optional[str] = check io.read(f, end="")
+    mut rows: vector[vector[str]] = []
+    if text is not None:
+        rows = check parse(&text, sep)
+    comptime if R == dict:
+        return check records(&rows)
+    else:
+        return rows
+
+priv manual fn parse(text: &str, sep: &str) -> vector[vector[str]] raises CsvError:
+    check check_sep(sep)
+    const split: u8 = sep.byte(0)
+    const n: size = byte_len(text)
+    # The row being read is the last one.
+    mut rows: vector[vector[str]] = [[]]
+    mut field: vector[u8] = []
+    mut line: size = 1
+    mut quoted: bool = False
+    # Whether the current row has begun, so that an empty last line adds nothing.
+    mut started: bool = False
+    mut i: size = 0
+    while i < n:
+        const b: u8 = text.byte(i)
+        if quoted:
+            if b == 34 and i + 1 < n and text.byte(i + 1) == 34:
+                field.push(34)
+                i += 1
+            elif b == 34:
+                quoted = False
+            else:
+                if b == 10:
+                    line += 1
+                field.push(b)
+        elif b == 34:
+            if len(field) > 0:
+                raise CsvError(line=line, reason="a quote inside a field that is not quoted")
+            quoted = True
+            started = True
+        elif b == split:
+            rows[len(rows) - 1].push(field_of(&field))
+            field.clear()
+            started = True
+        elif b == 10 or b == 13:
+            if b == 13 and i + 1 < n and text.byte(i + 1) == 10:
+                i += 1
+            if started or len(field) > 0:
+                rows[len(rows) - 1].push(field_of(&field))
+                field.clear()
+                rows.push([])
+            started = False
+            line += 1
+        else:
+            field.push(b)
+            started = True
+        i += 1
+    if quoted:
+        raise CsvError(line=line, reason="a quoted field is not closed")
+    if started or len(field) > 0:
+        rows[len(rows) - 1].push(field_of(&field))
+    else:
+        rows.pop()
+    return rows
+
+priv manual fn records(rows: &vector[vector[str]]) -> vector[dict[str, str]] raises CsvError:
+    mut records: vector[dict[str, str]] = []
+    if len(rows) == 0:
+        return records
+    for r in range(1, len(rows)):
+        if len(rows[r]) != len(rows[0]):
+            raise CsvError(line=r + 1, reason=f"{len(rows[r])} fields where the header has {len(rows[0])}")
+        mut record: dict[str, str] = dict()
+        for c in range(len(rows[0])):
+            record[f"{rows[0][c]}"] = f"{rows[r][c]}"
+        records.push(record)
+    return records
+
+priv manual fn needs_quotes(field: &str, split: u8) -> bool:
+    for i in range(byte_len(field)):
+        const b: u8 = field.byte(i)
+        if b == split or b == 34 or b == 10 or b == 13:
+            return True
+    return False
+
+priv manual fn row_text(row: &vector[str], sep: &str) -> str:
+    const split: u8 = sep.byte(0)
+    mut out: str = ""
+    for c in range(len(row)):
+        if c > 0:
+            out += sep
+        if needs_quotes(&row[c], split):
+            out += "\""
+            out += row[c].replace("\"", "\"\"")
+            out += "\""
+        else:
+            out += row[c]
+    return out
+
+# Writes `rows`, one line each. Dicts are written as the keys of the first as a header, then
+# each one's values in that order.
+manual fn dump[T](rows: &vector[T], to: &File = stdout, sep: &str = ",") raises CsvError:
+    check check_sep(sep)
+    comptime if T == dict:
+        if len(rows) == 0:
+            return
+        const names: vector[str] = rows[0].keys()
+        print(row_text(&names, sep), to=to)
+        for r in range(len(rows)):
+            mut fields: vector[str] = []
+            for name in &names:
+                const field: Optional[str] = rows[r].get(&name)
+                if field is None:
+                    raise CsvError(line=r + 2, reason=f"no `{name}` in this row")
+                fields.push(field)
+            print(row_text(&fields, sep), to=to)
+    else:
+        for row in rows:
+            print(row_text(row, sep), to=to)

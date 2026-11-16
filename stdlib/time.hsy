@@ -1,0 +1,124 @@
+# time: measuring durations, waiting, and the date. Durations are in seconds unless `unit=`
+# says otherwise: `time.elapsed(start, unit=time.ms)`.
+
+# The units, as nanoseconds.
+comptime h: i64 = 3600000000000
+comptime m: i64 = 60000000000
+comptime s: i64 = 1000000000
+comptime ms: i64 = 1000000
+comptime us: i64 = 1000
+comptime ns: i64 = 1
+
+priv manual struct Timespec:
+    seconds: i64
+    nanoseconds: i64
+
+@symbol("clock_gettime")
+priv extern fn c_clock_gettime(clock: i32, out: ptr[Timespec]) -> i32
+@symbol("nanosleep")
+priv extern fn c_nanosleep(wanted: ptr[Timespec], left: Optional[ptr[Timespec]]) -> i32
+@symbol("QueryPerformanceCounter")
+priv extern fn win_counter(out: ptr[i64]) -> i32
+@symbol("QueryPerformanceFrequency")
+priv extern fn win_frequency(out: ptr[i64]) -> i32
+@symbol("GetSystemTimeAsFileTime")
+priv extern fn win_file_time(out: ptr[i64])
+@symbol("Sleep")
+priv extern fn win_sleep(ms: u32)
+
+priv manual fn check_unit(unit: i64):
+    if unit != h and unit != m and unit != s and unit != ms and unit != us and unit != ns:
+        panic("time: the unit is time.h, time.m, time.s, time.ms, time.us or time.ns")
+
+# Nanoseconds on a clock that only moves forward.
+priv manual fn steady_now() -> i64:
+    comptime if target.os == "windows":
+        mut ticks: i64 = 0
+        mut frequency: i64 = 1
+        win_counter(ptr(&ticks))
+        win_frequency(ptr(&frequency))
+        return i64(f64(ticks) * (1000000000.0 / f64(frequency)))
+    else:
+        mut now: Timespec = Timespec(seconds=0, nanoseconds=0)
+        comptime if target.os == "macos":
+            c_clock_gettime(6, ptr(&now))
+        else:
+            c_clock_gettime(1, ptr(&now))
+        return now.seconds * 1000000000 + now.nanoseconds
+
+# A moment, from `now()`, to measure the time since.
+manual struct Instant:
+    priv nanoseconds: i64
+
+manual fn now() -> Instant:
+    return Instant(nanoseconds=steady_now())
+
+# The time since `start`.
+manual fn elapsed(start: &Instant, unit: i64 = s) -> f64:
+    check_unit(unit)
+    return f64(steady_now() - start.nanoseconds) / f64(unit)
+
+# The time since 1 January 1970, UTC.
+manual fn timestamp(unit: i64 = s) -> f64:
+    check_unit(unit)
+    comptime if target.os == "windows":
+        # Hundreds of nanoseconds since 1601.
+        mut since_1601: i64 = 0
+        win_file_time(ptr(&since_1601))
+        return f64(since_1601 - 116444736000000000) * 100.0 / f64(unit)
+    else:
+        mut now: Timespec = Timespec(seconds=0, nanoseconds=0)
+        c_clock_gettime(0, ptr(&now))
+        return (f64(now.seconds) * 1000000000.0 + f64(now.nanoseconds)) / f64(unit)
+
+# Waits `duration`.
+manual fn sleep(duration: f64, unit: i64 = s):
+    check_unit(unit)
+    if duration <= 0.0:
+        return
+    const total: i64 = i64(duration * f64(unit))
+    comptime if target.os == "windows":
+        win_sleep(u32(total // 1000000))
+    else:
+        mut wanted: Timespec = Timespec(seconds=total // 1000000000, nanoseconds=total % 1000000000)
+        c_nanosleep(ptr(&wanted), None)
+
+# A day and a time, in UTC; written `2026/11/16 00:06:00`.
+manual struct Date(Show):
+    year: i64
+    month: i64
+    day: i64
+    hour: i64
+    minute: i64
+    second: i64
+
+    method show(&self) -> str:
+        return f"{self.year}/{two(self.month)}/{two(self.day)} {two(self.hour)}:{two(self.minute)}:{two(self.second)}"
+
+priv manual fn two(n: i64) -> str:
+    if n < 10:
+        return f"0{n}"
+    return f"{n}"
+
+# The date of a timestamp in seconds, by default now.
+manual fn date(t: f64 = -1.0) -> Date:
+    mut seconds: i64 = i64(t)
+    if t < 0.0:
+        seconds = i64(timestamp())
+    mut days: i64 = seconds // 86400
+    const rest: i64 = seconds % 86400
+    # Days to a civil date, after Howard Hinnant's algorithm.
+    days += 719468
+    const era: i64 = days // 146097
+    const day_of_era: i64 = days - era * 146097
+    const year_of_era: i64 = (day_of_era - day_of_era // 1460 + day_of_era // 36524 - day_of_era // 146096) // 365
+    const day_of_year: i64 = day_of_era - (365 * year_of_era + year_of_era // 4 - year_of_era // 100)
+    const month_index: i64 = (5 * day_of_year + 2) // 153
+    const day: i64 = day_of_year - (153 * month_index + 2) // 5 + 1
+    mut month: i64 = month_index + 3
+    if month > 12:
+        month -= 12
+    mut year: i64 = year_of_era + era * 400
+    if month <= 2:
+        year += 1
+    return Date(year=year, month=month, day=day, hour=rest // 3600, minute=rest % 3600 // 60, second=rest % 60)

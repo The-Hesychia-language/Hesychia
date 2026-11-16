@@ -1,0 +1,83 @@
+# random: numbers that look random, from a generator each thread keeps to itself, seeded by
+# the clock unless `seed` is called. Not for secrets: `sys_bytes` asks the system for those.
+
+import time
+from io import IoError
+
+@symbol("hsy_random_state")
+priv extern fn state() -> ptr[u64]
+@symbol("hsy_system_bytes")
+priv extern fn system_bytes(out: ptr[u8], count: size) -> i32
+
+priv manual fn spread(x: u64) -> u64:
+    mut z: u64 = x.wrapping_add(11400714819323198485)
+    z = (z ^ (z >> 30)).wrapping_mul(13787848793156543929)
+    z = (z ^ (z >> 27)).wrapping_mul(10723151780598845931)
+    return z ^ (z >> 31)
+
+priv manual fn rotate(x: u64, k: u64) -> u64:
+    return (x << k) | (x >> (64 - k))
+
+# Starts the suite again from `n`: the same seed gives the same numbers.
+manual fn seed(n: u64):
+    const s: ptr[u64] = state()
+    mut x: u64 = n
+    for i in range(4):
+        x = spread(x)
+        s[i] = x
+    s[4] = 1
+
+# The next 64 bits of xoshiro256**.
+priv manual fn bits() -> u64:
+    const s: ptr[u64] = state()
+    if s[4] == 0:
+        seed(u64(time.timestamp(unit=time.ns)))
+    const result: u64 = rotate(s[1].wrapping_mul(5), 7).wrapping_mul(9)
+    const t: u64 = s[1] << 17
+    s[2] ^= s[0]
+    s[3] ^= s[1]
+    s[1] ^= s[2]
+    s[0] ^= s[3]
+    s[2] ^= t
+    s[3] = rotate(s[3], 45)
+    return result
+
+# An integer from `low` to `high`, both included.
+manual fn int(low: i64, high: i64) -> i64:
+    if high < low:
+        panic("random.int: low is above high")
+    const span: u64 = u64(high - low) + 1
+    if span == 0:
+        return i64(bits())
+    return low + i64(bits() % span)
+
+# A real number from `low` up to `high`, `high` excluded; from 0 up to 1 by default.
+manual fn float(low: f64 = 0.0, high: f64 = 1.0) -> f64:
+    if high < low:
+        panic("random.float: low is above high")
+    return low + (high - low) * (f64(bits() >> 11) / 9007199254740992.0)
+
+# A copy of one of `items`.
+manual fn item[T](items: &vector[T]) -> T:
+    if len(items) == 0:
+        panic("random.item: the vector is empty")
+    return items[size(bits() % u64(len(items)))].copy()
+
+# Puts `items` in a random order.
+manual fn shuffle[T](items: &mut vector[T]):
+    mut i: size = len(items)
+    while i > 1:
+        const j: size = size(bits() % u64(i))
+        i -= 1
+        items.swap(i, j)
+
+# `count` bytes no one can predict, from the system: for keys, tokens and passwords.
+manual fn sys_bytes(count: size) -> vector[u8] raises IoError:
+    mut out: vector[u8] = []
+    if count == 0:
+        return out
+    for _ in range(count):
+        out.push(0)
+    if system_bytes(ptr(&out[0]), count) == 0:
+        raise IoError(path="<system>", reason="the system gave no random bytes")
+    return out

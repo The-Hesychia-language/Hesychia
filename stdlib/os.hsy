@@ -1,0 +1,59 @@
+# os: the program's arguments, its environment, other programs, and leaving.
+
+from io import IoError
+
+@symbol("hsy_arg_count")
+priv extern fn arg_count() -> size
+@symbol("hsy_arg")
+priv extern fn arg(i: size) -> ptr[u8]
+@symbol("getenv")
+priv extern fn c_getenv(name: ptr[u8]) -> Optional[ptr[u8]]
+@symbol("getcwd")
+priv extern fn c_getcwd(buffer: ptr[u8], length: size) -> Optional[ptr[u8]]
+@symbol("hsy_run")
+priv extern fn c_run(argv: ptr[Optional[ptr[u8]]]) -> i32
+@symbol("hsy_error_text")
+priv extern fn error_text() -> ptr[u8]
+@symbol("exit")
+priv extern fn c_exit(code: i32)
+
+# The words the program was started with, its own path first.
+manual fn args() -> vector[str]:
+    mut words: vector[str] = []
+    for i in range(arg_count()):
+        words.push(str.from_c(arg(i)))
+    return words
+
+# The value of an environment variable.
+manual fn env(name: &str) -> Optional[str]:
+    const value: Optional[ptr[u8]] = c_getenv(name.to_c())
+    if value is None:
+        return None
+    return str.from_c(value)
+
+# The folder the program works in.
+manual fn cwd() -> str raises IoError:
+    mut buffer: vector[u8] = []
+    for _ in range(4096):
+        buffer.push(0)
+    const path: Optional[ptr[u8]] = c_getcwd(ptr(&buffer[0]), 4096)
+    if path is None:
+        raise IoError(path=".", reason=str.from_c(error_text()))
+    return str.from_c(path)
+
+# Runs a program, its name first, `os.run(["git", "status"])`, and gives its exit code.
+manual fn run(command: &vector[str]) -> i32 raises IoError:
+    if len(command) == 0:
+        raise IoError(path="", reason="os.run needs the name of a program")
+    mut argv: vector[Optional[ptr[u8]]] = []
+    for i in range(len(command)):
+        argv.push(command[i].to_c())
+    argv.push(None)
+    const code: i32 = c_run(ptr(&argv[0]))
+    if code < 0:
+        raise IoError(path=f"{command[0]}", reason="the program could not start")
+    return code
+
+# Ends the program now, with `code` (0 for success). Values still alive are not released.
+manual fn exit(code: i32):
+    c_exit(code)
