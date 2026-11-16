@@ -5,7 +5,7 @@ use std::collections::{HashSet, VecDeque};
 use std::fs;
 use std::path::PathBuf;
 
-use crate::ast::{Module, Program};
+use crate::ast::{FnDecl, Item, Module, Program};
 use crate::diag::{Diagnostic, Result, SourceMap, Span};
 use crate::project::Project;
 use crate::{lexer, parser, stdlib};
@@ -14,7 +14,14 @@ use crate::{lexer, parser, stdlib};
 /// package, and the modules it imports. Each import is rewritten to the module's full name:
 /// `json.parse` for `import parse` inside the `json` dependency.
 /// The prelude is loaded with the main module.
-pub fn load(main_file: usize, project: &Project, sources: &mut SourceMap) -> Result<Program> {
+/// `None` builds the program; `Some(name)` builds a program that runs the `@test` function
+/// `name` of the main file in place of its `main`.
+pub fn load(
+    main_file: usize,
+    project: &Project,
+    sources: &mut SourceMap,
+    test: Option<&str>,
+) -> Result<Program> {
     let prelude = stdlib_file(stdlib::PRELUDE, sources);
     let mut seen = HashSet::from(["main".to_string(), stdlib::PRELUDE.to_string()]);
     let mut queue = VecDeque::from([
@@ -37,9 +44,69 @@ pub fn load(main_file: usize, project: &Project, sources: &mut SourceMap) -> Res
             }
         }
         let stdlib = package.is_none();
-        modules.push(Module { name, stdlib, imports: parsed.imports, items: parsed.items });
+        let mut items = parsed.items;
+        if !stdlib {
+            let root = modules.is_empty();
+            items = keep_tests(items, if root { test } else { None })?;
+            if let (true, Some(name)) = (root, test) {
+                items.retain(|item| !matches!(item, Item::Fn(f) if f.name == "main"));
+                let runner =
+                    sources.add(format!("<test {name}>"), format!("managed fn main():\n    {name}()\n"));
+                items.extend(parser::parse(lexer::lex(sources.source(runner), runner)?)?.items);
+            }
+        }
+        modules.push(Module { name, stdlib, imports: parsed.imports, items });
     }
     Ok(Program { modules })
+}
+
+/// The `@test` functions of the file, checked to take and give nothing.
+pub fn tests(source: &str, file: usize) -> Result<Vec<String>> {
+    let items = parser::parse(lexer::lex(source, file)?)?.items;
+    let mut names = Vec::new();
+    for item in &items {
+        if let Item::Fn(f) = item
+            && is_test(f)
+        {
+            check_test(f)?;
+            names.push(f.name.clone());
+        }
+    }
+    Ok(names)
+}
+
+fn is_test(f: &FnDecl) -> bool {
+    f.decorators.iter().any(|d| d.name == "test")
+}
+
+fn check_test(f: &FnDecl) -> Result<()> {
+    let span = f.decorators.iter().find(|d| d.name == "test").map_or(f.span, |d| d.span);
+    if !f.params.is_empty() || f.ret.is_some() || !f.generics.is_empty() || f.decorators.len() > 1 {
+        return Err(Diagnostic::error(
+            span,
+            format!("a test is `fn {}():`, with no parameters and no result", f.name),
+        )
+        .with_hint("`@test` goes alone above the function"));
+    }
+    Ok(())
+}
+
+/// A program leaves its `@test` functions out; a test program keeps only the one it runs.
+fn keep_tests(items: Vec<Item>, test: Option<&str>) -> Result<Vec<Item>> {
+    let mut kept = Vec::new();
+    for item in items {
+        match item {
+            Item::Fn(mut f) if is_test(&f) => {
+                check_test(&f)?;
+                if test == Some(f.name.as_str()) {
+                    f.decorators.clear();
+                    kept.push(Item::Fn(f));
+                }
+            }
+            item => kept.push(item),
+        }
+    }
+    Ok(kept)
 }
 
 /// Where an import leads.

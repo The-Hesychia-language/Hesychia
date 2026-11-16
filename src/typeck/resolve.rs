@@ -841,12 +841,15 @@ impl Signer<'_> {
     /// stops on a fault or a `panic`.
     fn fn_decorators(&mut self, f: &crate::ast::FnDecl, index: usize, sig: &FnSig) -> Result<()> {
         for d in &f.decorators {
+            if d.name == "test" {
+                continue;
+            }
             if d.name != "panic_handler" {
                 return Err(Diagnostic::error(
                     d.span,
                     format!("unknown decorator `@{}` on a function", d.name),
                 )
-                .with_hint("functions take `@panic_handler`"));
+                .with_hint("functions take `@panic_handler` and `@test`"));
             }
             let expected = [Type::Ref(Box::new(Type::Str), false)];
             let fits = f.level == Level::Manual

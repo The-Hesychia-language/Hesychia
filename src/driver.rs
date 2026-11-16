@@ -80,6 +80,46 @@ pub struct BuildOptions {
     pub emit_c: bool,
     /// Show each copy `managed` code inserted.
     pub warn_copies: bool,
+    /// Build the program that runs this `@test` function of the entry file.
+    pub test: Option<String>,
+    /// Keep warnings to oneself, as for every test of a file after the first.
+    pub quiet: bool,
+}
+
+/// The `@test` functions of a file, in order.
+pub fn tests_of(path: &Path) -> Result<Vec<String>, String> {
+    let name = path.display().to_string();
+    let source = fs::read_to_string(path).map_err(|e| format!("cannot read {name}: {e}"))?;
+    let mut sources = SourceMap::default();
+    let file = sources.add(name, source);
+    loader::tests(sources.source(file), file).map_err(|diag| diag.render(&sources))
+}
+
+impl Input {
+    /// The files of a project whose tests `hsy test` runs: `src/` and `tests/`, at any depth.
+    pub fn test_files(&self) -> Vec<PathBuf> {
+        let Some(root) = self.target_dir.as_ref().and_then(|t| t.parent()) else {
+            return vec![self.entry.clone()];
+        };
+        let mut files = Vec::new();
+        for dir in ["src", "tests"] {
+            collect_hsy(&root.join(dir), &mut files);
+        }
+        files.sort();
+        files
+    }
+}
+
+fn collect_hsy(dir: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_hsy(&path, out);
+        } else if path.extension().is_some_and(|e| e == "hsy") {
+            out.push(path);
+        }
+    }
 }
 
 /// One build: the machine it is for, and whether it is the only one this command makes.
@@ -124,7 +164,7 @@ fn compile_to_c(input: &Input, options: &BuildOptions, platform: &Platform) -> R
     let mut sources = SourceMap::default();
     let main_file = sources.add(name, source);
 
-    let program = loader::load(main_file, &input.project, &mut sources);
+    let program = loader::load(main_file, &input.project, &mut sources, options.test.as_deref());
     let render = |diag: Diagnostic| diag.render(&sources);
     let mut program = program.map_err(render)?;
     let heap_threshold = input
@@ -135,8 +175,10 @@ fn compile_to_c(input: &Input, options: &BuildOptions, platform: &Platform) -> R
         .unwrap_or(crate::comptime::HEAP_THRESHOLD);
     let checked = typeck::check(&mut program, &Target { platform: platform.clone(), debug, heap_threshold })
         .map_err(render)?;
-    for warning in checked.warnings.iter().cloned() {
-        eprint!("{}", render(warning));
+    if !options.quiet {
+        for warning in checked.warnings.iter().cloned() {
+            eprint!("{}", render(warning));
+        }
     }
     if options.warn_copies {
         for copy in checked.copies.iter().cloned() {

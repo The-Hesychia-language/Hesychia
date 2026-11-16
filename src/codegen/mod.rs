@@ -428,7 +428,9 @@ impl Emitter<'_> {
                     text.len()
                 )
             }
-            None => String::new(),
+            // What was written before the fault is kept; a message says why the program stops.
+            None => "fflush(stdout);\n    fputs(\"panic: the program stopped on a fault, such as an index out of range\\n\", stderr);\n    "
+                .to_string(),
         };
         format!("\nstatic void hsy_panic(void) {{\n    {call}__builtin_trap();\n}}\n")
     }

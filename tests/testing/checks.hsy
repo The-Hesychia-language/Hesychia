@@ -1,0 +1,43 @@
+# Run by tests/test_command.rs: some of these tests pass, others fail on purpose.
+from io import print
+from test import expect, equal
+
+manual fn twice(n: i64) -> i64:
+    return n * 2
+
+managed fn main():
+    print(f"{twice(4)}")
+
+@test
+manual fn parses_numbers() raises ParseError:
+    equal(&check i64("42"), &42)
+    expect(len("été") == 3)
+
+@test
+managed fn sorts():
+    v = [3, 1, 2]
+    v.sort()
+    equal(v, [1, 3, 2])
+
+@test
+managed fn doubles():
+    equal(twice(21), 42)
+
+@test
+managed fn words():
+    equal("ab".upper(), "AB")
+    equal("x", "y")
+
+@test
+manual fn broken():
+    const n: i32 = "text"
+
+@test
+managed fn reads_bad_number():
+    n = i64("x")
+
+@test
+manual fn out_of_bounds():
+    const v: vector[i32] = [1]
+    print("before")
+    expect(v[3] == 1)

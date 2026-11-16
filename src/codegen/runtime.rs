@@ -193,10 +193,11 @@ __attribute__((noreturn)) HSY_UNUSED static void hsy_panic_text(const hsy_str* s
     fflush(stdout);
     __builtin_trap();
 #endif
+    fflush(stdout);
     fputs("panic: ", stderr);
     fwrite(s->data ? s->data : "", 1, s->len, stderr);
     fputc('\n', stderr);
-    hsy_panic();
+    __builtin_trap();
 }
 
 HSY_UNUSED static void hsy_print(const hsy_str* s, const hsy_str* end, void* stream) {

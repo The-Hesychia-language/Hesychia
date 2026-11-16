@@ -25,6 +25,7 @@ usage:
   hsy new <name>
   hsy build [<file.hsy>] [--release] [--target <triple>] [-o <output>] [--emit-c] [--warn-copies]
   hsy run [<file.hsy>] [--release] [--warn-copies]
+  hsy test [<file.hsy>] [<part of a test name>]
 
   Without a file, hsy builds the project whose hesychia.toml is in this folder or above,
   for each target of its [settings] targets (the host by default).
@@ -50,6 +51,9 @@ fn run(args: &[String]) -> Result<ExitCode, String> {
         let dir = project::create(name)?;
         println!("created {}: build it with `cd {} && hsy run`", dir.display(), dir.display());
         return Ok(ExitCode::SUCCESS);
+    }
+    if command == "test" {
+        return test(rest);
     }
     let (source, target, options) = parse_options(rest)?;
     let input = match source {
@@ -89,7 +93,14 @@ type Options = (Option<PathBuf>, Option<Platform>, BuildOptions);
 fn parse_options(args: &[String]) -> Result<Options, String> {
     let mut source = None;
     let mut target = None;
-    let mut options = BuildOptions { release: false, output: None, emit_c: false, warn_copies: false };
+    let mut options = BuildOptions {
+        release: false,
+        output: None,
+        emit_c: false,
+        warn_copies: false,
+        test: None,
+        quiet: false,
+    };
     let mut args = args.iter();
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -103,6 +114,77 @@ fn parse_options(args: &[String]) -> Result<Options, String> {
         }
     }
     Ok((source, target, options))
+}
+
+/// `hsy test [file.hsy] [part of a name]`: builds and runs each `@test` function on its own,
+/// and says which failed.
+fn test(args: &[String]) -> Result<ExitCode, String> {
+    let mut file = None;
+    let mut filter = String::new();
+    for arg in args {
+        match arg {
+            _ if arg.ends_with(".hsy") && file.is_none() => file = Some(PathBuf::from(arg)),
+            _ if !arg.starts_with('-') && filter.is_empty() => filter.clone_from(arg),
+            _ => return Err(format!("unexpected argument `{arg}`\n{USAGE}")),
+        }
+    }
+    let mut input = match &file {
+        Some(path) => driver::Input::file(path),
+        None => driver::Input::project(&std::env::current_dir().map_err(|e| e.to_string())?)?,
+    };
+    let files = if file.is_some() { vec![input.entry.clone()] } else { input.test_files() };
+    let binary = std::env::temp_dir().join(format!("hsy-test-{}", std::process::id()));
+    let here = std::env::current_dir().unwrap_or_default();
+    let (mut run, mut failed) = (0, 0);
+    let mut last_error: Option<String> = None;
+    for path in files {
+        let shown = path.strip_prefix(&here).unwrap_or(&path).display().to_string();
+        let names: Vec<String> =
+            driver::tests_of(&path)?.into_iter().filter(|n| n.contains(&filter)).collect();
+        input.entry.clone_from(&path);
+        for (index, name) in names.iter().enumerate() {
+            run += 1;
+            let options = BuildOptions {
+                release: false,
+                output: Some(binary.clone()),
+                emit_c: false,
+                warn_copies: false,
+                test: Some(name.clone()),
+                quiet: index > 0,
+            };
+            let built =
+                driver::build(&input, &options, &driver::Build { platform: &Platform::host(), only: true });
+            if let Err(message) = built {
+                failed += 1;
+                println!("FAIL  {name}  ({shown}): it does not compile");
+                // Code shared by the tests fails each of them the same way: said once.
+                if last_error.as_ref() != Some(&message) {
+                    eprintln!("{message}");
+                    last_error = Some(message);
+                }
+                continue;
+            }
+            let output = Command::new(&binary).output().map_err(|e| format!("cannot run the test: {e}"))?;
+            if output.status.success() {
+                println!("ok    {name}");
+                continue;
+            }
+            failed += 1;
+            println!("FAIL  {name}  ({shown})");
+            let said = [output.stdout, output.stderr].concat();
+            for line in String::from_utf8_lossy(&said).lines() {
+                println!("      {line}");
+            }
+            if said.is_empty() {
+                let code = output.status.code().map_or("a signal".to_string(), |c| format!("code {c}"));
+                println!("      stopped with {code}");
+            }
+        }
+    }
+    let _ = std::fs::remove_file(&binary);
+    let plural = if run == 1 { "" } else { "s" };
+    println!("{run} test{plural}, {failed} failed");
+    Ok(if failed == 0 && run > 0 { ExitCode::SUCCESS } else { ExitCode::FAILURE })
 }
 
 /// Builds into a temporary binary, runs it, and forwards its exit code.

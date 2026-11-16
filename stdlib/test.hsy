@@ -1,0 +1,14 @@
+# Checks for `hsy test`: a check that fails stops its test, saying why.
+
+# Stops the test when `condition` is False.
+manual fn expect(condition: bool):
+    if not condition:
+        panic("expect: the condition is False")
+
+# Stops the test when `a` and `b` differ, writing both.
+manual fn equal[T: Equal](a: &T, b: &T):
+    if not (a == b):
+        comptime if T == str or T == char:
+            panic(f"equal: '{a}' != '{b}'")
+        else:
+            panic(f"equal: {a} != {b}")

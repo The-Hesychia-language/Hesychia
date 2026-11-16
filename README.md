@@ -303,6 +303,7 @@ cargo build --release
 | `hsy build ... -o <path>` | Output path (default: the file name without extension) |
 | `hsy build ... --emit-c` | Keeps the generated C file next to the binary |
 | `hsy run <file.hsy> [--release]` | Builds to a temporary binary and runs it |
+| `hsy test [<file.hsy>] [<name>]` | Runs the `@test` functions of the file, or of a project's `src/` and `tests/`, those whose name holds `<name>` |
 | `hsy new <name>` | Creates a project: `hesychia.toml`, `src/main.hsy`, `.gitignore` |
 | `hsy build` / `hsy run` without a file | Builds the project whose `hesychia.toml` is in this folder or above, into `target/debug/<name>` or `target/release/<name>` |
 | `hsy build ... --target <triple>` | Builds for another machine: `x86_64-windows-gnu`, `aarch64-linux-gnu`, `x86_64-linux-musl`, `aarch64-macos`... A project puts the binary in `target/<triple>/debug/`; Windows binaries end in `.exe` and are linked statically |
@@ -365,6 +366,30 @@ manual fn main():
 ## Editor
 
 The extension for [Zed](https://zed.dev) lives in its own repository, [Zed-LSP](https://github.com/The-Hesychia-language/Zed-LSP): coloring in the manner of Python, matched brackets, indentation after `:`, and an outline of functions and types.
+
+## Testing Hesychia programs
+
+A test is a function marked `@test`, with no parameters and no result, in `managed` or `manual` code. It goes beside the code it checks, or in a project's `tests/` folder. The `test` module checks with `expect(condition)` and `equal(a, b)`, which writes both values when they differ. A test fails when a check fails, when an error leaves it, or when the program stops on a fault.
+
+```python
+from test import expect, equal
+
+@test
+managed fn sorts():
+    v = [3, 1, 2]
+    v.sort()
+    equal(v, [1, 2, 3])
+```
+
+```
+$ hsy test
+ok    parses_numbers
+FAIL  sorts  (src/list.hsy)
+      panic: equal: [1, 3, 2] != [1, 2, 3]
+2 tests, 1 failed
+```
+
+Each test is built and run on its own, so one that stops does not take the others with it; what it wrote is shown when it fails. A program built by `hsy build` or `hsy run` leaves its tests out. `hsy test` ends with code 1 when a test fails.
 
 ## Tests
 
