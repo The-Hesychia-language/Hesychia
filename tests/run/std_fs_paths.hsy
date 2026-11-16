@@ -1,0 +1,16 @@
+from io import print
+import fs
+
+managed fn main():
+    print(f"{fs.join("data", "sales.csv")} {fs.join("data/", "a")} {fs.join("", "a")} {fs.join("data", "/etc")}")
+    for p in ["data/sales.csv", "a/b/", "name", "/a", "/", ".bashrc", "a.tar.gz", "été/çà.txt"]:
+        print(f"{p}: [{fs.parent(p)}] [{fs.name(p)}] [{fs.stem(p)}]")
+# expect: data/sales.csv data/a a /etc
+# expect: data/sales.csv: [data] [sales.csv] [sales]
+# expect: a/b/: [a] [b] [b]
+# expect: name: [.] [name] [name]
+# expect: /a: [/] [a] [a]
+# expect: /: [/] [] []
+# expect: .bashrc: [.] [.bashrc] [.bashrc]
+# expect: a.tar.gz: [.] [a.tar.gz] [a.tar]
+# expect: été/çà.txt: [été] [çà.txt] [çà]

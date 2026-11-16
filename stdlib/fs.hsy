@@ -93,6 +93,86 @@ manual fn extension(path: &str, ext: &str) -> bool:
     const before: u8 = path.byte(n - m - 2)
     return before != 47 and before != 92
 
+# --- paths ---------------------------------------------------------------------
+# Paths are joined with `/`, which Windows also takes; there `\` separates too.
+
+priv manual fn is_separator(b: u8) -> bool:
+    comptime if target.os == "windows":
+        return b == 47 or b == 92
+    else:
+        return b == 47
+
+# The bytes a path starts with that make it absolute: `/`, or on Windows `\`, `C:` or `C:\`.
+priv manual fn root_len(path: &str) -> size:
+    const n: size = byte_len(path)
+    comptime if target.os == "windows":
+        if n >= 2 and path.byte(1) == 58:
+            const letter: u8 = path.byte(0) | 32
+            if letter >= 97 and letter <= 122:
+                if n >= 3 and is_separator(path.byte(2)):
+                    return 3
+                return 2
+    if n >= 1 and is_separator(path.byte(0)):
+        return 1
+    return 0
+
+# Where the last name of `path` starts and ends, separators at the end left out.
+priv manual fn last_name(path: &str) -> (size, size):
+    const root: size = root_len(path)
+    mut end: size = byte_len(path)
+    while end > root and is_separator(path.byte(end - 1)):
+        end -= 1
+    mut start: size = end
+    while start > root and not is_separator(path.byte(start - 1)):
+        start -= 1
+    return (start, end)
+
+priv manual fn bytes_between(path: &str, start: size, end: size) -> str:
+    mut out: vector[u8] = []
+    for i in range(start, end):
+        out.push(path.byte(i))
+    const text: Optional[str] = str.from_bytes(&out)
+    if text is None:
+        return ""
+    return text
+
+# `path` then `name`, with a `/` between them: `fs.join("data", "sales.csv")` is
+# "data/sales.csv". A `name` that is absolute replaces `path`.
+manual fn join(path: &str, name: &str) -> str:
+    if byte_len(path) == 0 or root_len(name) > 0:
+        return f"{name}"
+    if byte_len(name) == 0 or is_separator(path.byte(byte_len(path) - 1)):
+        return f"{path}{name}"
+    return f"{path}/{name}"
+
+# The last name of `path`: `fs.name("data/sales.csv")` is "sales.csv".
+manual fn name(path: &str) -> str:
+    const (start, end): (size, size) = last_name(path)
+    return bytes_between(path, start, end)
+
+# The name of `path` without its extension: `fs.stem("data/sales.csv")` is "sales". A name
+# that starts with its only point, ".bashrc", has no extension.
+manual fn stem(path: &str) -> str:
+    const (start, end): (size, size) = last_name(path)
+    mut cut: size = end
+    while cut > start + 1 and path.byte(cut - 1) != 46:
+        cut -= 1
+    if cut > start + 1:
+        return bytes_between(path, start, cut - 1)
+    return bytes_between(path, start, end)
+
+# The folder that holds `path`: `fs.parent("data/sales.csv")` is "data", "." for a name alone,
+# and a root is its own parent.
+manual fn parent(path: &str) -> str:
+    const root: size = root_len(path)
+    const (start, _): (size, size) = last_name(path)
+    mut end: size = start
+    while end > root and is_separator(path.byte(end - 1)):
+        end -= 1
+    if end == 0:
+        return "."
+    return bytes_between(path, 0, end)
+
 # Where the name sits in a C `struct dirent`.
 priv manual fn name_offset() -> size:
     comptime if target.os == "macos":
