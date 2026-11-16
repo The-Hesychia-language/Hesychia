@@ -1,0 +1,759 @@
+# re: regular expressions, in the syntax of Python's `re`, on characters.
+#
+# Matching takes a time in proportion to the pattern and the text, whatever they are: the
+# engine follows every way through the pattern at once, so it has no backreferences and no
+# lookaround. `\d`, `\w`, `\s` and `\b` are ASCII; `$` is the end of the text.
+
+# A pattern that cannot be read, and where it goes wrong, in characters.
+manual struct PatternError:
+    at: size
+    reason: str
+
+# Where a pattern matched, and the text of its groups.
+manual struct Match:
+    priv texts: vector[str]
+    priv first: size
+    priv last: size
+
+    # The text of group `n`: the whole match for 0, "" for a group that took no part.
+    method group(&self, n: size = 0) -> str:
+        if n >= len(self.texts):
+            panic(f"re: the pattern has no group {n}")
+        return f"{self.texts[n]}"
+
+    # Where the match starts, in characters.
+    method start(&self) -> size:
+        return self.first
+
+    # Where the match ends, in characters: past its last one.
+    method end(&self) -> size:
+        return self.last
+
+# --- reading the pattern ----------------------------------------------------------
+
+# Kinds of nodes, and of instructions where they are the same.
+comptime CHAR: u8 = 0
+comptime ANY: u8 = 1
+comptime CLASS: u8 = 2
+comptime ASSERT: u8 = 3
+comptime EMPTY: u8 = 4
+comptime CONCAT: u8 = 5
+comptime ALT: u8 = 6
+comptime REPEAT: u8 = 7
+comptime GROUP: u8 = 8
+comptime SPLIT: u8 = 9
+comptime JUMP: u8 = 10
+comptime SAVE: u8 = 11
+comptime DONE: u8 = 12
+
+# What an `ASSERT` holds to.
+comptime START: u32 = 0
+comptime END: u32 = 1
+comptime WORD_EDGE: u32 = 2
+comptime NOT_WORD_EDGE: u32 = 3
+
+comptime NO_LIMIT: u32 = 4294967295
+comptime MOST_REPEATS: u32 = 1000
+comptime MOST_STEPS: size = 100000
+
+# A part of the pattern. A `CLASS` has its ranges in `bounds`, `count` pairs from `first`.
+priv manual struct Node:
+    kind: u8
+    code: u32
+    left: size
+    right: size
+    low: u32
+    high: u32
+    greedy: bool
+    negated: bool
+
+priv manual struct Parsed:
+    nodes: vector[Node]
+    bounds: vector[u32]
+    groups: u32
+
+priv manual fn node(kind: u8, code: u32, left: size, right: size) -> Node:
+    return Node(kind=kind, code=code, left=left, right=right, low=0, high=0, greedy=True, negated=False)
+
+priv manual fn add(p: &mut Parsed, owned n: Node) -> size:
+    p.nodes.push(n)
+    return len(p.nodes) - 1
+
+# A position in bytes as a position in characters.
+priv manual fn chars_to(text: &str, at: size) -> size:
+    mut count: size = 0
+    for i in range(at):
+        if (text.byte(i) & 192) != 128:
+            count += 1
+    return count
+
+priv manual fn error(pattern: &str, at: size, reason: &str) -> PatternError:
+    return PatternError(at=chars_to(pattern, at), reason=f"{reason}")
+
+# The code point that starts at byte `i` of valid text, and how many bytes it takes.
+priv manual fn decoded(text: &str, i: size) -> (u32, size):
+    const b: u32 = u32(text.byte(i))
+    if b < 128:
+        return (b, 1)
+    mut n: size = 2
+    mut code: u32 = b & 31
+    if b >= 240:
+        n = 4
+        code = b & 7
+    elif b >= 224:
+        n = 3
+        code = b & 15
+    for k in range(1, n):
+        code = (code << 6) | (u32(text.byte(i + k)) & 63)
+    return (code, n)
+
+priv manual fn is_digit(b: u8) -> bool:
+    return b >= 48 and b <= 57
+
+priv manual fn is_word(b: u8) -> bool:
+    return is_digit(b) or (b >= 65 and b <= 90) or (b >= 97 and b <= 122) or b == 95
+
+priv manual fn hex_value(b: u8) -> Optional[u32]:
+    if is_digit(b):
+        return u32(b - 48)
+    if b >= 97 and b <= 102:
+        return u32(b - 87)
+    if b >= 65 and b <= 70:
+        return u32(b - 55)
+    return None
+
+# The ranges of `\d`, `\w` or `\s`, by the letter after the `\`.
+priv manual fn push_shorthand(bounds: &mut vector[u32], letter: u8):
+    if letter == 100:
+        bounds.push(48)
+        bounds.push(57)
+    elif letter == 119:
+        for r in [48, 57, 65, 90, 95, 95, 97, 122]:
+            bounds.push(u32(r))
+    else:
+        for r in [9, 13, 32, 32]:
+            bounds.push(u32(r))
+
+priv manual fn is_shorthand(b: u8) -> bool:
+    return b == 100 or b == 119 or b == 115
+
+# `count` hex digits, from `at`.
+priv manual fn hex_code(pattern: &str, at: &mut size, count: size) -> u32 raises PatternError:
+    const start: size = at
+    mut code: u32 = 0
+    for _ in range(count):
+        if at >= byte_len(pattern):
+            raise error(pattern, start, "an escape needs more hex digits")
+        const digit: Optional[u32] = hex_value(pattern.byte(at))
+        if digit is None:
+            raise error(pattern, start, "an escape needs more hex digits")
+        if code > 268435455:
+            raise error(pattern, start, "an escape beyond the last character")
+        code = code * 16 + digit
+        at += 1
+    if code > 1114111:
+        raise error(pattern, start, "an escape beyond the last character")
+    return code
+
+# The character a `\` stands for, `at` past the letter after it; letters that stand for
+# classes or positions are handled before.
+priv manual fn escaped_char(pattern: &str, at: &mut size, letter: u8) -> u32 raises PatternError:
+    if letter == 110:
+        return 10
+    if letter == 116:
+        return 9
+    if letter == 114:
+        return 13
+    if letter == 102:
+        return 12
+    if letter == 118:
+        return 11
+    if letter == 97:
+        return 7
+    if letter == 48:
+        return 0
+    if letter == 120:
+        return check hex_code(pattern, at, 2)
+    if letter == 117:
+        return check hex_code(pattern, at, 4)
+    if letter == 85:
+        return check hex_code(pattern, at, 8)
+    if is_digit(letter):
+        raise error(pattern, at - 2, "backreferences are not supported")
+    if is_word(letter):
+        raise error(pattern, at - 2, "an unknown escape")
+    return u32(letter)
+
+# One end of a range in a class: a character or an escape.
+priv manual fn class_char(pattern: &str, at: &mut size) -> u32 raises PatternError:
+    if pattern.byte(at) == 92:
+        if at + 1 >= byte_len(pattern):
+            raise error(pattern, at, "the pattern ends after a `\\`")
+        const letter: u8 = pattern.byte(at + 1)
+        at += 2
+        if letter == 98:
+            return 8
+        return check escaped_char(pattern, at, letter)
+    const (code, n): (u32, size) = decoded(pattern, at)
+    at += n
+    return code
+
+# A class, from its `[`.
+priv manual fn read_class(pattern: &str, at: &mut size, p: &mut Parsed) -> size raises PatternError:
+    const start: size = at
+    at += 1
+    mut negated: bool = False
+    if at < byte_len(pattern) and pattern.byte(at) == 94:
+        negated = True
+        at += 1
+    const first: size = len(p.bounds)
+    mut items: size = 0
+    mut closed: bool = False
+    while not closed:
+        if at >= byte_len(pattern):
+            raise error(pattern, start, "a class is not closed")
+        const b: u8 = pattern.byte(at)
+        if b == 93 and items > 0:
+            closed = True
+            at += 1
+        elif b == 92 and at + 1 < byte_len(pattern) and is_shorthand(pattern.byte(at + 1)):
+            push_shorthand(&mut p.bounds, pattern.byte(at + 1))
+            at += 2
+            items += 1
+        elif b == 92 and at + 1 < byte_len(pattern) and (pattern.byte(at + 1) == 68 or pattern.byte(at + 1) == 87 or pattern.byte(at + 1) == 83):
+            raise error(pattern, at, "`\\D`, `\\W` and `\\S` are not supported in a class")
+        else:
+            const low_at: size = at
+            const low: u32 = check class_char(pattern, at)
+            mut high: u32 = low
+            if at + 1 < byte_len(pattern) and pattern.byte(at) == 45 and pattern.byte(at + 1) != 93:
+                at += 1
+                high = check class_char(pattern, at)
+                if high < low:
+                    raise error(pattern, low_at, "a range goes backwards")
+            p.bounds.push(low)
+            p.bounds.push(high)
+            items += 1
+    const pairs: size = (len(p.bounds) - first) // 2
+    mut n: Node = node(CLASS, 0, first, pairs)
+    n.negated = negated
+    return add(p, n)
+
+# A class for `\d`, `\D` and the others, by the letter after the `\`.
+priv manual fn shorthand(p: &mut Parsed, letter: u8) -> size:
+    const first: size = len(p.bounds)
+    mut lower: u8 = letter
+    if letter < 97:
+        lower = letter + 32
+    push_shorthand(&mut p.bounds, lower)
+    mut n: Node = node(CLASS, 0, first, (len(p.bounds) - first) // 2)
+    n.negated = letter < 97
+    return add(p, n)
+
+# A number of a `{n,m}`, from `at`; None without digits.
+priv manual fn count_at(pattern: &str, at: &mut size) -> Optional[u32]:
+    if at >= byte_len(pattern) or not is_digit(pattern.byte(at)):
+        return None
+    mut value: u32 = 0
+    while at < byte_len(pattern) and is_digit(pattern.byte(at)):
+        if value < 100000:
+            value = value * 10 + u32(pattern.byte(at) - 48)
+        at += 1
+    return value
+
+priv manual fn read_atom(pattern: &str, at: &mut size, p: &mut Parsed, depth: size) -> size raises PatternError:
+    const b: u8 = pattern.byte(at)
+    if b == 40:
+        if depth > 200:
+            raise error(pattern, at, "groups are nested too deep")
+        const start: size = at
+        at += 1
+        mut number: u32 = 0
+        if at < byte_len(pattern) and pattern.byte(at) == 63:
+            if at + 1 < byte_len(pattern) and pattern.byte(at + 1) == 58:
+                at += 2
+            elif at + 1 < byte_len(pattern) and pattern.byte(at + 1) == 80:
+                raise error(pattern, start, "named groups are not supported")
+            elif at + 1 < byte_len(pattern) and (pattern.byte(at + 1) == 61 or pattern.byte(at + 1) == 33 or pattern.byte(at + 1) == 60):
+                raise error(pattern, start, "lookaround is not supported")
+            else:
+                raise error(pattern, start, "flags and other `(?` groups are not supported")
+        else:
+            p.groups += 1
+            number = p.groups
+        const inner: size = check read_alt(pattern, at, p, depth + 1)
+        if at >= byte_len(pattern):
+            raise error(pattern, start, "a group is not closed")
+        at += 1
+        return add(p, node(GROUP, number, inner, 0))
+    if b == 91:
+        return check read_class(pattern, at, p)
+    if b == 46:
+        at += 1
+        return add(p, node(ANY, 0, 0, 0))
+    if b == 94:
+        at += 1
+        return add(p, node(ASSERT, START, 0, 0))
+    if b == 36:
+        at += 1
+        return add(p, node(ASSERT, END, 0, 0))
+    if b == 42 or b == 43 or b == 63:
+        raise error(pattern, at, "nothing to repeat")
+    if b == 92:
+        if at + 1 >= byte_len(pattern):
+            raise error(pattern, at, "the pattern ends after a `\\`")
+        const letter: u8 = pattern.byte(at + 1)
+        at += 2
+        if is_shorthand(letter) or letter == 68 or letter == 87 or letter == 83:
+            return shorthand(p, letter)
+        if letter == 98:
+            return add(p, node(ASSERT, WORD_EDGE, 0, 0))
+        if letter == 66:
+            return add(p, node(ASSERT, NOT_WORD_EDGE, 0, 0))
+        if letter == 65:
+            return add(p, node(ASSERT, START, 0, 0))
+        if letter == 90:
+            return add(p, node(ASSERT, END, 0, 0))
+        const code: u32 = check escaped_char(pattern, at, letter)
+        return add(p, node(CHAR, code, 0, 0))
+    const (code, n): (u32, size) = decoded(pattern, at)
+    at += n
+    return add(p, node(CHAR, code, 0, 0))
+
+# `{n}`, `{n,}`, `{,m}` or `{n,m}` from its `{`, as (low, high); None if it is not one, and
+# then the `{` is itself.
+priv manual fn read_braces(pattern: &str, at: &mut size) -> Optional[(u32, u32)]:
+    mut i: size = at + 1
+    const low: Optional[u32] = count_at(pattern, &mut i)
+    mut high: Optional[u32] = low
+    if i < byte_len(pattern) and pattern.byte(i) == 44:
+        i += 1
+        high = count_at(pattern, &mut i)
+        if high is None:
+            high = NO_LIMIT
+    if i >= byte_len(pattern) or pattern.byte(i) != 125:
+        return None
+    if low is None and i == at + 2:
+        return None
+    at = i + 1
+    mut least: u32 = 0
+    if low is not None:
+        least = low
+    mut to: u32 = NO_LIMIT
+    if high is not None:
+        to = high
+    return (least, to)
+
+priv manual fn read_repeat(pattern: &str, at: &mut size, p: &mut Parsed, depth: size) -> size raises PatternError:
+    const atom: size = check read_atom(pattern, at, p, depth)
+    if at >= byte_len(pattern):
+        return atom
+    const start: size = at
+    const b: u8 = pattern.byte(at)
+    mut low: u32 = 0
+    mut high: u32 = NO_LIMIT
+    if b == 42:
+        at += 1
+    elif b == 43:
+        low = 1
+        at += 1
+    elif b == 63:
+        high = 1
+        at += 1
+    elif b == 123:
+        const braces: Optional[(u32, u32)] = read_braces(pattern, at)
+        if braces is None:
+            return atom
+        const (least, most): (u32, u32) = braces
+        if most != NO_LIMIT and most < least:
+            raise error(pattern, start, "a repeat range goes backwards")
+        if least > MOST_REPEATS or (most != NO_LIMIT and most > MOST_REPEATS):
+            raise error(pattern, start, f"a repeat count above {MOST_REPEATS}")
+        low = least
+        high = most
+    else:
+        return atom
+    if p.nodes[atom].kind == ASSERT:
+        raise error(pattern, start, "nothing to repeat")
+    mut greedy: bool = True
+    if at < byte_len(pattern) and pattern.byte(at) == 63:
+        greedy = False
+        at += 1
+    if at < byte_len(pattern) and (pattern.byte(at) == 42 or pattern.byte(at) == 43 or pattern.byte(at) == 63):
+        raise error(pattern, at, "multiple repeat")
+    mut n: Node = node(REPEAT, 0, atom, 0)
+    n.low = low
+    n.high = high
+    n.greedy = greedy
+    return add(p, n)
+
+priv manual fn read_concat(pattern: &str, at: &mut size, p: &mut Parsed, depth: size) -> size raises PatternError:
+    mut joined: size = 0
+    mut any: bool = False
+    while at < byte_len(pattern) and pattern.byte(at) != 124 and pattern.byte(at) != 41:
+        const item: size = check read_repeat(pattern, at, p, depth)
+        if any:
+            joined = add(p, node(CONCAT, 0, joined, item))
+        else:
+            joined = item
+            any = True
+    if not any:
+        return add(p, node(EMPTY, 0, 0, 0))
+    return joined
+
+priv manual fn read_alt(pattern: &str, at: &mut size, p: &mut Parsed, depth: size) -> size raises PatternError:
+    mut left: size = check read_concat(pattern, at, p, depth)
+    while at < byte_len(pattern) and pattern.byte(at) == 124:
+        at += 1
+        const right: size = check read_concat(pattern, at, p, depth)
+        left = add(p, node(ALT, 0, left, right))
+    return left
+
+# --- the program ---------------------------------------------------------------------
+
+# An instruction. `SPLIT` goes on at `x` first, then `y`; a `CLASS` has its ranges as a node.
+priv manual struct Inst:
+    kind: u8
+    code: u32
+    x: size
+    y: size
+    negated: bool
+
+priv manual struct Program:
+    insts: vector[Inst]
+    bounds: vector[u32]
+    slots: size
+
+priv manual fn inst(kind: u8, code: u32, x: size, y: size) -> Inst:
+    return Inst(kind=kind, code=code, x=x, y=y, negated=False)
+
+priv manual fn emit(prog: &mut Program, owned i: Inst) -> size raises PatternError:
+    if len(prog.insts) >= MOST_STEPS:
+        raise PatternError(at=0, reason="the pattern is too large")
+    prog.insts.push(i)
+    return len(prog.insts) - 1
+
+priv manual fn compile_node(p: &Parsed, index: size, prog: &mut Program) raises PatternError:
+    const kind: u8 = p.nodes[index].kind
+    const code: u32 = p.nodes[index].code
+    const left: size = p.nodes[index].left
+    const right: size = p.nodes[index].right
+    if kind == CHAR or kind == ANY or kind == ASSERT:
+        check emit(prog, inst(kind, code, 0, 0))
+    elif kind == CLASS:
+        mut i: Inst = inst(CLASS, 0, left, right)
+        i.negated = p.nodes[index].negated
+        check emit(prog, i)
+    elif kind == CONCAT:
+        check compile_node(p, left, prog)
+        check compile_node(p, right, prog)
+    elif kind == ALT:
+        const split: size = check emit(prog, inst(SPLIT, 0, 0, 0))
+        prog.insts[split].x = len(prog.insts)
+        check compile_node(p, left, prog)
+        const jump: size = check emit(prog, inst(JUMP, 0, 0, 0))
+        prog.insts[split].y = len(prog.insts)
+        check compile_node(p, right, prog)
+        prog.insts[jump].x = len(prog.insts)
+    elif kind == GROUP:
+        if code > 0:
+            check emit(prog, inst(SAVE, code * 2, 0, 0))
+        check compile_node(p, left, prog)
+        if code > 0:
+            check emit(prog, inst(SAVE, code * 2 + 1, 0, 0))
+    elif kind == REPEAT:
+        const low: u32 = p.nodes[index].low
+        const high: u32 = p.nodes[index].high
+        const greedy: bool = p.nodes[index].greedy
+        for _ in range(low):
+            check compile_node(p, left, prog)
+        if high == NO_LIMIT:
+            const split: size = check emit(prog, inst(SPLIT, 0, 0, 0))
+            check compile_node(p, left, prog)
+            check emit(prog, inst(JUMP, 0, split, 0))
+            const out: size = len(prog.insts)
+            if greedy:
+                prog.insts[split].x = split + 1
+                prog.insts[split].y = out
+            else:
+                prog.insts[split].x = out
+                prog.insts[split].y = split + 1
+        else:
+            mut splits: vector[size] = []
+            for _ in range(high - low):
+                splits.push(check emit(prog, inst(SPLIT, 0, 0, 0)))
+                check compile_node(p, left, prog)
+            const out: size = len(prog.insts)
+            for s in splits:
+                if greedy:
+                    prog.insts[s].x = s + 1
+                    prog.insts[s].y = out
+                else:
+                    prog.insts[s].x = out
+                    prog.insts[s].y = s + 1
+
+priv manual fn compile(pattern: &str) -> Program raises PatternError:
+    mut p: Parsed = Parsed(nodes=[], bounds=[], groups=0)
+    mut at: size = 0
+    const root: size = check read_alt(pattern, &mut at, &mut p, 0)
+    if at < byte_len(pattern):
+        raise error(pattern, at, "a `)` closes no group")
+    mut prog: Program = Program(insts=[], bounds=p.bounds.copy(), slots=(size(p.groups) + 1) * 2)
+    check emit(&mut prog, inst(SAVE, 0, 0, 0))
+    check compile_node(&p, root, &mut prog)
+    check emit(&mut prog, inst(SAVE, 1, 0, 0))
+    check emit(&mut prog, inst(DONE, 0, 0, 0))
+    return prog
+
+# --- running it --------------------------------------------------------------------
+
+# The threads that reach one position, highest priority first, with their groups.
+priv manual struct Threads:
+    pcs: vector[size]
+    slots: vector[i64]
+
+# A way through the program still to follow, or a group slot to put back.
+priv manual struct Step:
+    restore: bool
+    at: size
+    value: i64
+
+priv manual fn holds(kind: u32, text: &str, pos: size) -> bool:
+    if kind == START:
+        return pos == 0
+    if kind == END:
+        return pos == byte_len(text)
+    const before: bool = pos > 0 and is_word(text.byte(pos - 1))
+    const after: bool = pos < byte_len(text) and is_word(text.byte(pos))
+    if kind == WORD_EDGE:
+        return before != after
+    return before == after
+
+priv manual fn takes(prog: &Program, i: size, c: u32) -> bool:
+    const kind: u8 = prog.insts[i].kind
+    if kind == CHAR:
+        return prog.insts[i].code == c
+    if kind == ANY:
+        return c != 10
+    if kind == CLASS:
+        const first: size = prog.insts[i].x
+        mut found: bool = False
+        for k in range(prog.insts[i].y):
+            if c >= prog.bounds[first + 2 * k] and c <= prog.bounds[first + 2 * k + 1]:
+                found = True
+        return found != prog.insts[i].negated
+    return False
+
+# Adds the threads that `pc` leads to at `pos`, following jumps, splits, saves and positions;
+# `slots` are the groups so far, as they were when it returns.
+priv manual fn follow(prog: &Program, list: &mut Threads, seen: &mut vector[size], mark: size, pc: size, slots: &mut vector[i64], text: &str, pos: size):
+    mut stack: vector[Step] = [Step(restore=False, at=pc, value=0)]
+    while len(stack) > 0:
+        const step: Optional[Step] = stack.pop()
+        if step is not None:
+            if step.restore:
+                slots[step.at] = step.value
+            else:
+                mut at: size = step.at
+                mut going: bool = True
+                while going and seen[at] != mark:
+                    seen[at] = mark
+                    const kind: u8 = prog.insts[at].kind
+                    if kind == JUMP:
+                        at = prog.insts[at].x
+                    elif kind == SPLIT:
+                        stack.push(Step(restore=False, at=prog.insts[at].y, value=0))
+                        at = prog.insts[at].x
+                    elif kind == SAVE:
+                        const slot: size = size(prog.insts[at].code)
+                        stack.push(Step(restore=True, at=slot, value=slots[slot]))
+                        slots[slot] = i64(pos)
+                        at += 1
+                    elif kind == ASSERT:
+                        if holds(prog.insts[at].code, text, pos):
+                            at += 1
+                        else:
+                            going = False
+                    else:
+                        list.pcs.push(at)
+                        for s in slots:
+                            list.slots.push(s)
+                        going = False
+
+# The group slots, in bytes, of the first match that starts at `start` or after; empty if
+# there is none. With `advance`, an empty match at `start` does not count, as after an empty
+# match there.
+priv manual fn run(prog: &Program, text: &str, start: size, advance: bool) -> vector[i64]:
+    const width: size = prog.slots
+    mut seen: vector[size] = []
+    for _ in range(len(prog.insts)):
+        seen.push(0)
+    mut mark: size = 1
+    mut found: vector[i64] = []
+    mut work: vector[i64] = []
+    for _ in range(width):
+        work.push(-1)
+    mut now: Threads = Threads(pcs=[], slots=[])
+    mut pos: size = start
+    mut going: bool = True
+    while going:
+        if len(found) == 0:
+            for k in range(width):
+                work[k] = -1
+            follow(prog, &mut now, &mut seen, mark, 0, &mut work, text, pos)
+        mut code: u32 = 0
+        mut n: size = 0
+        if pos < byte_len(text):
+            const (c, w): (u32, size) = decoded(text, pos)
+            code = c
+            n = w
+        mark += 1
+        mut next: Threads = Threads(pcs=[], slots=[])
+        mut stopped: bool = False
+        for t in range(len(now.pcs)):
+            if not stopped:
+                const pc: size = now.pcs[t]
+                const empty: bool = now.slots[t * width] == i64(start) and now.slots[t * width + 1] == i64(start)
+                if prog.insts[pc].kind == DONE and advance and empty:
+                    pass
+                elif prog.insts[pc].kind == DONE:
+                    found.clear()
+                    for k in range(width):
+                        found.push(now.slots[t * width + k])
+                    stopped = True
+                elif n > 0 and takes(prog, pc, code):
+                    for k in range(width):
+                        work[k] = now.slots[t * width + k]
+                    follow(prog, &mut next, &mut seen, mark, pc + 1, &mut work, text, pos + n)
+        if n == 0 or (len(next.pcs) == 0 and len(found) > 0):
+            going = False
+        now = next
+        pos += n
+    return found
+
+priv manual fn bytes_between(text: &str, start: size, end: size) -> str:
+    mut out: vector[u8] = []
+    for i in range(start, end):
+        out.push(text.byte(i))
+    const piece: Optional[str] = str.from_bytes(&out)
+    if piece is None:
+        return ""
+    return piece
+
+priv manual fn group_texts(text: &str, slots: &vector[i64]) -> vector[str]:
+    mut texts: vector[str] = []
+    for g in range(len(slots) // 2):
+        const a: i64 = slots[2 * g]
+        const b: i64 = slots[2 * g + 1]
+        if a < 0 or b < 0:
+            texts.push("")
+        else:
+            texts.push(bytes_between(text, size(a), size(b)))
+    return texts
+
+priv manual fn match_of(text: &str, slots: &vector[i64]) -> Match:
+    return Match(texts=group_texts(text, slots), first=chars_to(text, size(slots[0])), last=chars_to(text, size(slots[1])))
+
+# --- what it gives -----------------------------------------------------------------
+
+# The first match of `pattern` in `text`, or None. `^` and `$` hold it to the start and the
+# end: `re.search("^[0-9]+$", text)` asks whether `text` is all digits.
+manual fn search(pattern: &str, text: &str) -> Optional[Match] raises PatternError:
+    const prog: Program = check compile(pattern)
+    const slots: vector[i64] = run(&prog, text, 0, False)
+    if len(slots) == 0:
+        return None
+    return match_of(text, &slots)
+
+# The text of every match, one after the other.
+manual fn find_all(pattern: &str, text: &str) -> vector[str] raises PatternError:
+    const prog: Program = check compile(pattern)
+    mut out: vector[str] = []
+    mut start: size = 0
+    mut advance: bool = False
+    while start <= byte_len(text):
+        const slots: vector[i64] = run(&prog, text, start, advance)
+        if len(slots) == 0:
+            start = byte_len(text) + 1
+        else:
+            const a: size = size(slots[0])
+            const b: size = size(slots[1])
+            out.push(bytes_between(text, a, b))
+            start = b
+            advance = a == b
+    return out
+
+# `text` with every match replaced by `new`, where `\1` to `\9` and `\g<12>` stand for a group
+# and `\\` for a `\`.
+manual fn replace(pattern: &str, text: &str, new: &str) -> str raises PatternError:
+    const prog: Program = check compile(pattern)
+    const groups: size = prog.slots // 2
+    mut out: str = ""
+    mut copied: size = 0
+    mut start: size = 0
+    mut advance: bool = False
+    while start <= byte_len(text):
+        const slots: vector[i64] = run(&prog, text, start, advance)
+        if len(slots) == 0:
+            start = byte_len(text) + 1
+        else:
+            const a: size = size(slots[0])
+            const b: size = size(slots[1])
+            out += bytes_between(text, copied, a)
+            const texts: vector[str] = group_texts(text, &slots)
+            mut i: size = 0
+            while i < byte_len(new):
+                const c: u8 = new.byte(i)
+                if c == 92 and i + 1 < byte_len(new):
+                    const d: u8 = new.byte(i + 1)
+                    mut group: Optional[size] = None
+                    mut skip: size = 2
+                    if d >= 49 and d <= 57:
+                        group = size(d - 48)
+                    elif d == 103 and i + 2 < byte_len(new) and new.byte(i + 2) == 60:
+                        mut j: size = i + 3
+                        const number: Optional[u32] = count_at(new, &mut j)
+                        if number is None or j >= byte_len(new) or new.byte(j) != 62:
+                            raise PatternError(at=chars_to(new, i), reason="a `\\g<...>` needs a group number")
+                        group = size(number)
+                        skip = j + 1 - i
+                    if group is not None:
+                        if group >= groups:
+                            raise PatternError(at=chars_to(new, i), reason=f"the pattern has no group {group}")
+                        out += texts[group]
+                    elif d == 92:
+                        out += "\\"
+                    else:
+                        out += bytes_between(new, i, i + 2)
+                    i += skip
+                else:
+                    const (_, n): (u32, size) = decoded(new, i)
+                    out += bytes_between(new, i, i + n)
+                    i += n
+            copied = b
+            start = b
+            advance = a == b
+    out += bytes_between(text, copied, byte_len(text))
+    return out
+
+# The parts of `text` between its matches; empty matches do not split.
+manual fn split(pattern: &str, text: &str) -> vector[str] raises PatternError:
+    const prog: Program = check compile(pattern)
+    mut out: vector[str] = []
+    mut copied: size = 0
+    mut start: size = 0
+    mut advance: bool = False
+    while start <= byte_len(text):
+        const slots: vector[i64] = run(&prog, text, start, advance)
+        if len(slots) == 0:
+            start = byte_len(text) + 1
+        else:
+            const a: size = size(slots[0])
+            const b: size = size(slots[1])
+            if b > a:
+                out.push(bytes_between(text, copied, a))
+                copied = b
+            start = b
+            advance = a == b
+    out.push(bytes_between(text, copied, byte_len(text)))
+    return out

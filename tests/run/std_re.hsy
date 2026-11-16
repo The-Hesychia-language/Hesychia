@@ -1,0 +1,40 @@
+from io import print
+import re
+
+managed fn main():
+    m = re.search("(\\w+)@(\\w+)\\.com", "write to ann@example.com today")
+    if m is not None:
+        print(f"{m.group()} {m.group(1)} {m.group(2)} {m.start()} {m.end()}")
+    print(f"{re.search("^[0-9]+$", "12a")}")
+    print(f"{re.find_all("[0-9]+", "a1 b22 c333")}")
+    print(f"{re.find_all("é+", "ééa é")}")
+    print(re.replace("(\\w+) (\\w+)", "hello world", "\\2 \\1"))
+    print(re.replace("x*", "abxd", "-"))
+    print(f"{re.split(",\\s*", "a, b,c ,  d")}")
+    print(f"{re.find_all("a+?|b{2,3}", "aabbbbb")}")
+    print(f"{re.find_all("\\bcat\\b", "cat concat cat.")}")
+    m2 = re.search("(a)|(b)", "b")
+    if m2 is not None:
+        print(f"[{m2.group(1)}] [{m2.group(2)}]")
+    for bad in ["(ab", "a)", "*a", "[z-a]", "a**", "(?=a)", "\\1"]:
+        try:
+            re.search(bad, "")
+        except PatternError as e:
+            print(f"{bad}: {e.at} {e.reason}")
+# expect: ann@example.com ann example 9 24
+# expect: None
+# expect: ['1', '22', '333']
+# expect: ['éé', 'é']
+# expect: world hello
+# expect: -a-b--d-
+# expect: ['a', 'b', 'c ', 'd']
+# expect: ['a', 'a', 'bbb', 'bb']
+# expect: ['cat', 'cat']
+# expect: [] [b]
+# expect: (ab: 0 a group is not closed
+# expect: a): 1 a `)` closes no group
+# expect: *a: 0 nothing to repeat
+# expect: [z-a]: 1 a range goes backwards
+# expect: a**: 2 multiple repeat
+# expect: (?=a): 0 lookaround is not supported
+# expect: \1: 0 backreferences are not supported
