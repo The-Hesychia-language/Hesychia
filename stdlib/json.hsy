@@ -281,7 +281,10 @@ priv manual fn dump_into(out: &mut str, value: &Value, indent: size, depth: size
         case Value.Null:
             out += "null"
         case Value.Bool(flag):
-            out += f"{flag}".lower()
+            if flag:
+                out += "true"
+            else:
+                out += "false"
         case Value.Number(number):
             # Integers are written without a point, as JSON writers usually do.
             if number == f64(i64(number)) and number < 9007199254740992.0 and number > -9007199254740992.0:

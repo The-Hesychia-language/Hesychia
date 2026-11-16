@@ -37,7 +37,7 @@ priv manual fn char_of(text: &str, i: size) -> size:
             count += 1
     return count
 
-# Bytes cut from valid text where characters start, or changed only in ASCII, are valid text.
+# Bytes cut from valid text where characters start, or built from whole characters, are valid text.
 priv manual fn text_of(bytes: &vector[u8]) -> str:
     const text: Optional[str] = str.from_bytes(bytes)
     if text is None:
@@ -64,14 +64,93 @@ priv manual fn byte_find(text: &str, part: &str, after: size) -> Optional[size]:
             return start
     return None
 
-priv manual fn ascii_case(text: &str, low: u8, high: u8) -> str:
+@symbol("hsy_case_map")
+priv extern fn case_map(code: u32, upper: bool, out: ptr[u32]) -> size
+@symbol("hsy_case_cased")
+priv extern fn case_cased(code: u32) -> bool
+@symbol("hsy_case_ignorable")
+priv extern fn case_ignorable(code: u32) -> bool
+
+# The code point that starts at byte `i` of valid text, and how many bytes it takes.
+priv manual fn decoded(text: &str, i: size) -> (u32, size):
+    const b: u32 = u32(text.byte(i))
+    if b < 128:
+        return (b, 1)
+    mut n: size = 2
+    mut code: u32 = b & 31
+    if b >= 240:
+        n = 4
+        code = b & 7
+    elif b >= 224:
+        n = 3
+        code = b & 15
+    for k in range(1, n):
+        code = (code << 6) | (u32(text.byte(i + k)) & 63)
+    return (code, n)
+
+priv manual fn encode(out: &mut vector[u8], code: u32):
+    if code < 128:
+        out.push(u8(code))
+    elif code < 2048:
+        out.push(u8(192 | (code >> 6)))
+        out.push(u8(128 | (code & 63)))
+    elif code < 65536:
+        out.push(u8(224 | (code >> 12)))
+        out.push(u8(128 | ((code >> 6) & 63)))
+        out.push(u8(128 | (code & 63)))
+    else:
+        out.push(u8(240 | (code >> 18)))
+        out.push(u8(128 | ((code >> 12) & 63)))
+        out.push(u8(128 | ((code >> 6) & 63)))
+        out.push(u8(128 | (code & 63)))
+
+# Whether a cased letter comes before byte `i`, past the characters case ignores.
+priv manual fn cased_before(text: &str, i: size) -> bool:
+    mut at: size = i
+    while at > 0:
+        at -= 1
+        while at > 0 and not starts_char(text, at):
+            at -= 1
+        const (code, _): (u32, size) = decoded(text, at)
+        if not case_ignorable(code):
+            return case_cased(code)
+    return False
+
+# Whether a cased letter comes from byte `i` on, past the characters case ignores.
+priv manual fn cased_after(text: &str, i: size) -> bool:
+    mut at: size = i
+    while at < byte_len(text):
+        const (code, n): (u32, size) = decoded(text, at)
+        if not case_ignorable(code):
+            return case_cased(code)
+        at += n
+    return False
+
+# `text` in capitals with `upper`, else in small letters, as Unicode maps them; a capital
+# sigma ending a word becomes the final sigma.
+priv manual fn unicode_case(text: &str, upper: bool) -> str:
     mut out: vector[u8] = []
-    for i in range(byte_len(text)):
+    mut mapped: array[u32, 3] = [0, 0, 0]
+    mut i: size = 0
+    while i < byte_len(text):
         const b: u8 = text.byte(i)
-        if b >= low and b <= high:
-            out.push(b ^ 32)
+        if b < 128:
+            if upper and b >= 97 and b <= 122:
+                out.push(b ^ 32)
+            elif not upper and b >= 65 and b <= 90:
+                out.push(b ^ 32)
+            else:
+                out.push(b)
+            i += 1
         else:
-            out.push(b)
+            const (code, n): (u32, size) = decoded(text, i)
+            if not upper and code == 931 and cased_before(text, i) and not cased_after(text, i + n):
+                encode(&mut out, 962)
+            else:
+                const count: size = case_map(code, upper, ptr(&mut mapped[0]))
+                for k in range(count):
+                    encode(&mut out, mapped[k])
+            i += n
     return text_of(&out)
 
 # Which side of a text `strip` works on.
@@ -178,12 +257,12 @@ extend str:
         out += bytes_of(self, start, byte_len(self))
         return out
 
-    # ASCII letters only.
+    # As Unicode maps letters: "straße".upper() is "STRASSE".
     method upper(&self) -> str:
-        return ascii_case(self, 97, 122)
+        return unicode_case(self, True)
 
     method lower(&self) -> str:
-        return ascii_case(self, 65, 90)
+        return unicode_case(self, False)
 
     # `", ".join(words)`.
     method join(&self, parts: &vector[str]) -> str:

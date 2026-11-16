@@ -1,0 +1,11 @@
+from io import print
+
+managed fn main():
+    print("straße été ǅ".upper())
+    print("ΟΔΥΣΣΕΥΣ İSTANBUL ÀÉ".lower())
+    print("Hello, World 42".upper())
+    print("ΣΑ Σ. ΑΣ'Σ".lower())
+# expect: STRASSE ÉTÉ Ǆ
+# expect: οδυσσευς i̇stanbul àé
+# expect: HELLO, WORLD 42
+# expect: σα σ. ασ'ς

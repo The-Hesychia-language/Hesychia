@@ -225,7 +225,7 @@ The standard library is written in Hesychia, in `stdlib/`, and built into `hsy`:
 
 | Prelude | |
 |---|---|
-| `str` | `starts_with`, `ends_with`, `find` (a character position), `strip()` and `strip(side=Side.Start)` or `side=Side.End`, `split(sep)` and `split()` on spaces, `replace`, `upper`, `lower` (ASCII), `sep.join(parts)`, `s[a:b]` by characters, `part in s` |
+| `str` | `starts_with`, `ends_with`, `find` (a character position), `strip()` and `strip(side=Side.Start)` or `side=Side.End`, `split(sep)` and `split()` on spaces, `replace`, `upper`, `lower` (Unicode, as Python: `"straße".upper()` is `"STRASSE"`), `sep.join(parts)`, `s[a:b]` by characters, `part in s` |
 | `vector` | `contains`, `find`, `count`, `reverse`, `extend`, `sort` (stable), `v[a:b]` (a copy), `x in v`; `swap(i, j)` is the compiler's |
 | `dict[K, V]` | `d = dict[str, i32]()`, `d[k] = v`, `d[k] += 1`, `k in d`, `len(d)`, `get`, `remove`, `clear`, `keys`, `values`, `items`, in the order entries were added; a missing key in `d[k]` stops the program; written `{'a': 1}` |
 | `set[T]` | `add`, `remove`, `in`, `len`, `clear`, `values`, `union`, `intersection`; written `{1, 2}`, or `set()` when empty |
@@ -375,6 +375,7 @@ manual fn main():
 | `src/platform.rs` | Target triples and the C compiler of each target |
 | `src/diag.rs` | Error and warning rendering |
 | `tests/run/`, `tests/fail/`, `tests/panic/` | Programs that must run, be rejected, or stop at runtime |
+| `tools/unicode_case.py` | Writes `src/codegen/case.c`, the Unicode case tables, from Python's Unicode data |
 
 ## Editor
 

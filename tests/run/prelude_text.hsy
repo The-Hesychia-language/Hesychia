@@ -22,7 +22,7 @@ managed fn main():
         print(f"{u8("256")}")
     except ParseError as e:
         print(f"bad {e.text}")
-# expect: [Héllo, wörld] [Héllo, wörld  ] [  Héllo, wörld] HéLLO, WöRLD héllo, wörld
+# expect: [Héllo, wörld] [Héllo, wörld  ] [  Héllo, wörld] HÉLLO, WÖRLD héllo, wörld
 # expect: 7 éll Hé wörld True HéLLo, wörLd
 # expect: 4 ['a', 'b', '', 'c']
 # expect: 3 ['one', 'two', 'three']
