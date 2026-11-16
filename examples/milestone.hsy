@@ -1,0 +1,32 @@
+# First milestone: variables, arithmetic, if, while, and printf through extern.
+extern fn printf(fmt: ptr[u8], ...) -> i32
+
+manual fn square(x: i64) -> i64:
+    return x * x
+
+manual fn classify(n: i32) -> i32:
+    if n < 0:
+        return -1
+    elif n == 0:
+        return 0
+    else:
+        return 1
+
+manual fn main():
+    mut total: i64 = 0
+    mut i: i64 = 1
+    while i <= 10:
+        total += square(i)
+        i += 1
+    printf("sum of squares 1..10 = %lld\n".to_c(), total)
+
+    const ratio: f64 = f64(total) / 3.0
+    printf("ratio = %.3f\n".to_c(), ratio)
+
+    const small: u8 = u8(200)
+    const big: i32 = i32(small) * 100 // 7
+    printf("big = %d, sign = %d\n".to_c(), big, classify(-5))
+
+    mut flags: u32 = 0b1010
+    flags |= 1 << 2
+    printf("flags = 0x%x\n".to_c(), flags)
