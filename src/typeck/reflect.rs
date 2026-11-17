@@ -1,7 +1,14 @@
 //! `comptime for f in fields(T):` runs its body once for each field of the struct `T`. In
-//! the body, `f.name` is the field's name, and `field(x, f)` is that field of `x`.
-//! `empty[T]()` is the value a `T` starts with.
+//! the body, `f.name` is the field's name, `f.doc` the comment above it, `f.has_default`
+//! whether it has a value of its own, and `field(x, f)` is that field of `x`.
+//!
+//! `comptime for v in variants(T):` does the same for the cases of the enum `T`, with
+//! `v.name` and `v.doc`; there `fields(v)` are the fields of the case, `empty[T](v)` is a
+//! value of that case, and `field(x, f)` a field of `x`, which must be of that case.
+//!
+//! `empty[T]()` is the value a `T` starts with, and `doc(T)` the comment above `T`.
 
+use super::call::literal;
 use super::{Checker, Result};
 use crate::ast::{Builtin, Expr, ExprKind, Stmt, StmtKind, TypeExpr};
 use crate::diag::{Diagnostic, Span};
@@ -127,19 +134,29 @@ fn inside(expr: &mut Expr, change: &mut dyn FnMut(&mut Expr)) {
     change(expr);
 }
 
+/// What a `comptime for` goes over: a field, or a case of an enum.
+struct Part {
+    name: String,
+    doc: String,
+    has_default: bool,
+    /// For a field of an enum's case: the name of the case.
+    case: Option<String>,
+    /// For a case: the type as written, to name it in the copies of the body.
+    of: Option<String>,
+}
+
 impl Checker<'_> {
-    /// Replaces a `comptime for` with one copy of its body for each field.
+    /// Replaces a `comptime for` with one copy of its body for each field or case.
     pub(super) fn expand_comptime_for(&mut self, stmt: &mut Stmt) -> Result<()> {
         let StmtKind::ComptimeFor { var, source, body } = std::mem::replace(&mut stmt.kind, StmtKind::Pass) else {
             unreachable!("called on a comptime for")
         };
-        let names = self.reflected_fields(&source)?;
         let mut copies = Vec::new();
-        for name in names {
+        for part in self.reflected(&source)? {
             let mut copy = body.clone();
             let mut misuse = None;
             each_expr(&mut copy, &mut |expr| {
-                if let Err(problem) = use_field(expr, &var, &name) {
+                if let Err(problem) = use_part(expr, &var, &part) {
                     misuse.get_or_insert(problem);
                 }
             });
@@ -153,40 +170,110 @@ impl Checker<'_> {
         Ok(())
     }
 
-    /// The field names of the struct that `fields(T)` names.
-    fn reflected_fields(&mut self, source: &Expr) -> Result<Vec<String>> {
-        let wrong = || {
-            Diagnostic::error(source.span, "a `comptime for` goes over the fields of a struct")
-                .with_hint("write `comptime for f in fields(T):`")
-        };
-        let ExprKind::Call { callee, args, .. } = &source.kind else { return Err(wrong()) };
-        let [Expr { kind: ExprKind::Name(name), span, .. }] = args.as_slice() else { return Err(wrong()) };
-        if callee != "fields" {
-            return Err(wrong());
-        }
-        let ty = self.resolve(&TypeExpr::Named { name: name.clone(), args: Vec::new(), span: *span })?;
-        let Type::Struct(Named { id, .. }) = &ty else {
-            return Err(Diagnostic::error(*span, format!("`{ty}` is not a struct: it has no fields to go over")));
-        };
-        let def = &self.tables.types.structs[*id];
-        if def.module != self.module && def.fields.iter().any(|f| f.private) {
-            return Err(Diagnostic::error(
-                source.span,
-                format!("`{}` has private fields: only its module can go over them", def.name),
-            ));
-        }
-        Ok(def.fields.iter().map(|f| f.name.clone()).collect())
+    /// The type that the name `name` stands for, in `fields(T)` and the like.
+    fn reflected_type(&mut self, name: &str, span: Span) -> Result<Type> {
+        self.resolve(&TypeExpr::Named { name: name.to_string(), args: Vec::new(), span })
     }
 
-    /// `empty[T]()`: the value a `T` starts with.
+    /// The fields of `fields(T)`, or the cases of `variants(T)`.
+    fn reflected(&mut self, source: &Expr) -> Result<Vec<Part>> {
+        let wrong = || {
+            Diagnostic::error(source.span, "a `comptime for` goes over the fields of a struct or the cases of an enum")
+                .with_hint("write `comptime for f in fields(T):` or `comptime for v in variants(T):`")
+        };
+        let ExprKind::Call { callee, args, .. } = &source.kind else { return Err(wrong()) };
+        let (name, span, case) = match args.as_slice() {
+            [Expr { kind: ExprKind::Name(name), span, .. }] => (name, *span, None),
+            // `fields(v)`, as a copy of the body for the case `v` has it.
+            [Expr { kind: ExprKind::Name(name), span, .. }, Expr { kind: ExprKind::Str(case), .. }] => {
+                (name, *span, Some(case.clone()))
+            }
+            _ => return Err(wrong()),
+        };
+        let ty = self.reflected_type(name, span)?;
+        let part = |f: &crate::types::FieldDef, case: &Option<String>| Part {
+            name: f.name.clone(),
+            doc: f.doc.clone(),
+            has_default: f.default.is_some(),
+            case: case.clone(),
+            of: None,
+        };
+        match (callee.as_str(), &ty, &case) {
+            ("fields", Type::Struct(Named { id, .. }), None) => {
+                let def = &self.tables.types.structs[*id];
+                if def.module != self.module && def.fields.iter().any(|f| f.private) {
+                    return Err(Diagnostic::error(
+                        source.span,
+                        format!("`{}` has private fields: only its module can go over them", def.name),
+                    ));
+                }
+                Ok(def.fields.iter().map(|f| part(f, &None)).collect())
+            }
+            ("fields", Type::Enum { named, .. }, Some(wanted)) => {
+                let def = &self.tables.types.enums[named.id];
+                let variant = def.variants.iter().find(|v| &v.name == wanted).ok_or_else(wrong)?;
+                Ok(variant.fields.iter().map(|f| part(f, &case)).collect())
+            }
+            ("fields", _, _) => {
+                Err(Diagnostic::error(span, format!("`{ty}` is not a struct: it has no fields to go over")))
+            }
+            ("variants", Type::Enum { named, .. }, None) => {
+                let def = &self.tables.types.enums[named.id];
+                let case = |v: &crate::types::VariantDef| Part {
+                    name: v.name.clone(),
+                    doc: v.doc.clone(),
+                    has_default: false,
+                    case: None,
+                    of: Some(name.clone()),
+                };
+                Ok(def.variants.iter().map(case).collect())
+            }
+            ("variants", _, _) => {
+                Err(Diagnostic::error(span, format!("`{ty}` is not an enum: it has no cases to go over")))
+            }
+            _ => Err(wrong()),
+        }
+    }
+
+    /// `doc(T)`: the comment above the struct or the enum `T`.
+    pub(super) fn check_doc(&mut self, expr: &mut Expr) -> Result<Type> {
+        let ExprKind::Call { args, .. } = &expr.kind else { unreachable!("called on a call") };
+        let [Expr { kind: ExprKind::Name(name), span, .. }] = args.as_slice() else {
+            return Err(Diagnostic::error(expr.span, "`doc` takes a type: `doc(T)`"));
+        };
+        let doc = match self.reflected_type(&name.clone(), *span)? {
+            Type::Struct(named) => self.tables.types.structs[named.id].doc.clone(),
+            Type::Enum { named, .. } => self.tables.types.enums[named.id].doc.clone(),
+            _ => String::new(),
+        };
+        expr.kind = ExprKind::Str(doc);
+        Ok(Type::Str)
+    }
+
+    /// `empty[T]()`: the value a `T` starts with. `empty[T](v)`, in a `comptime for` over
+    /// the cases of `T`: a value of the case `v`.
     pub(super) fn check_empty(&mut self, expr: &mut Expr) -> Result<Type> {
-        let ExprKind::Call { type_args, .. } = &expr.kind else { unreachable!("called on a call") };
+        let ExprKind::Call { type_args, args, .. } = &expr.kind else { unreachable!("called on a call") };
         let ty = self.resolve(&type_args[0])?;
         // In a generic body checked for any `T`, the value waits for the type.
         if self.tables.has_param(&ty) {
             return Ok(ty);
         }
-        let Some(value) = self.starting_value(&ty, expr.span) else {
+        let value = match (args.as_slice(), &ty) {
+            ([], _) => self.starting_value(&ty, expr.span),
+            ([Expr { kind: ExprKind::Str(case), .. }], Type::Enum { named, .. }) => {
+                let def = &self.tables.types.enums[named.id];
+                def.variants.iter().position(|v| &v.name == case).and_then(|index| {
+                    let fields = &self.tables.types.enums[named.id].variants[index].fields;
+                    let args = fields.iter().map(|f| self.field_start(f, expr.span)).collect::<Option<_>>()?;
+                    let mut value = Expr::new(ExprKind::Variant { index, args }, expr.span);
+                    value.ty = Some(ty.clone());
+                    Some(value)
+                })
+            }
+            _ => None,
+        };
+        let Some(value) = value else {
             return Err(Diagnostic::error(expr.span, format!("a `{ty}` has no empty value")).with_hint(
                 "numbers, `bool`, `str`, `vector`, `Optional`, and structs and tuples of them have one",
             ));
@@ -195,12 +282,26 @@ impl Checker<'_> {
         Ok(ty)
     }
 
-    /// `0`, `False`, `""`, `[]`, `None`; a struct, tuple or array of them; the first case of
-    /// an enum when it has no fields.
+    /// What a field starts with: its default, or the empty value of its type.
+    fn field_start(&self, field: &crate::types::FieldDef, span: Span) -> Option<Expr> {
+        let Some(default) = &field.default else { return self.starting_value(&field.ty, span) };
+        let mut value = Expr::new(literal(default.clone()), span);
+        value.ty = Some(field.ty.clone());
+        // A default for an `Optional` field is the value it holds.
+        if let Type::Optional(inner) = &field.ty
+            && !matches!(value.kind, ExprKind::None)
+        {
+            value.ty = Some(inner.as_ref().clone());
+            let mut wrapped = Expr::new(ExprKind::Wrap(Box::new(value)), span);
+            wrapped.ty = Some(field.ty.clone());
+            return Some(wrapped);
+        }
+        Some(value)
+    }
+
+    /// `0`, `False`, `""`, `[]`, `None`; a struct, tuple or array of them, a field with a
+    /// default starting with it; the first case of an enum when it has no fields.
     fn starting_value(&self, ty: &Type, span: Span) -> Option<Expr> {
-        let all = |types: &mut dyn Iterator<Item = &Type>| -> Option<Vec<Expr>> {
-            types.map(|t| self.starting_value(t, span)).collect()
-        };
         let kind = match ty {
             Type::Vector(_) => ExprKind::Builtin { op: Builtin::VecNew, args: Vec::new() },
             Type::Optional(_) => ExprKind::None,
@@ -214,9 +315,11 @@ impl Checker<'_> {
                 if def.drop_method().is_some() {
                     return None;
                 }
-                ExprKind::Construct(all(&mut def.fields.iter().map(|f| &f.ty))?)
+                ExprKind::Construct(def.fields.iter().map(|f| self.field_start(f, span)).collect::<Option<_>>()?)
             }
-            Type::Tuple(items) => ExprKind::Tuple(all(&mut items.iter())?),
+            Type::Tuple(items) => {
+                ExprKind::Tuple(items.iter().map(|t| self.starting_value(t, span)).collect::<Option<_>>()?)
+            }
             Type::Enum { named, .. } => {
                 let first = self.tables.types.enums[named.id].variants.first()?;
                 if !first.fields.is_empty() {
@@ -232,19 +335,45 @@ impl Checker<'_> {
     }
 }
 
-/// In one copy of the body: `f.name` becomes the field's name, `field(x, f)` that field of `x`.
-fn use_field(expr: &mut Expr, var: &str, field: &str) -> Result<()> {
+/// In one copy of the body, what is said of the loop's variable becomes what it is for
+/// this field or case.
+fn use_part(expr: &mut Expr, var: &str, part: &Part) -> Result<()> {
     let is_var = |e: &Expr| matches!(&e.kind, ExprKind::Name(n) if n == var);
     match &mut expr.kind {
         ExprKind::Field { base, name } if is_var(base) => {
-            if name != "name" {
-                return Err(Diagnostic::error(expr.span, format!("a field has a `name`, not a `{name}`")));
-            }
-            expr.kind = ExprKind::Str(field.to_string());
+            expr.kind = match name.as_str() {
+                "name" => ExprKind::Str(part.name.clone()),
+                "doc" => ExprKind::Str(part.doc.clone()),
+                "has_default" if part.of.is_none() => ExprKind::Bool(part.has_default),
+                other => {
+                    let known = if part.of.is_some() { "`name` and `doc`" } else { "`name`, `doc` and `has_default`" };
+                    return Err(Diagnostic::error(expr.span, format!("`{var}` has {known}, not `{other}`")));
+                }
+            };
         }
-        ExprKind::Call { callee, args, .. } if callee == "field" && args.len() == 2 && is_var(&args[1]) => {
+        // `field(x, f)`: the field of a struct, or of the case of an enum that `x` is.
+        ExprKind::Call { callee, args, .. }
+            if callee == "field" && args.len() == 2 && is_var(&args[1]) && part.of.is_none() =>
+        {
             let base = args.swap_remove(0);
-            expr.kind = ExprKind::Field { base: Box::new(base), name: field.to_string() };
+            let name = match &part.case {
+                Some(case) => format!("as.{case}.{}", part.name),
+                None => part.name.clone(),
+            };
+            expr.kind = ExprKind::Field { base: Box::new(base), name };
+        }
+        // `fields(v)` and `empty[T](v)` name the case for the copies made later.
+        ExprKind::Call { callee, args, .. } if callee == "fields" && args.len() == 1 && is_var(&args[0]) => {
+            let Some(of) = &part.of else {
+                return Err(Diagnostic::error(expr.span, format!("`{var}` is a field: it has no fields")));
+            };
+            let span = args[0].span;
+            *args = vec![Expr::new(ExprKind::Name(of.clone()), span), Expr::new(ExprKind::Str(part.name.clone()), span)];
+        }
+        ExprKind::Call { callee, args, .. }
+            if callee == "empty" && args.len() == 1 && is_var(&args[0]) && part.of.is_some() =>
+        {
+            args[0].kind = ExprKind::Str(part.name.clone());
         }
         _ => {}
     }

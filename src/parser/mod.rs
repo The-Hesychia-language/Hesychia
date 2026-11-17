@@ -178,6 +178,11 @@ impl Parser {
         self.tokens[self.pos].span
     }
 
+    /// The comment above the line that the next token starts.
+    fn doc(&self) -> String {
+        self.tokens[self.pos].doc.clone().unwrap_or_default()
+    }
+
     fn at(&self, tok: &Tok) -> bool {
         self.peek() == tok
     }

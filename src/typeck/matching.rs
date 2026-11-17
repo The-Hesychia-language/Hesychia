@@ -33,7 +33,7 @@ impl Checker<'_> {
             .ok_or_else(|| Diagnostic::error(span, format!("`{}` has no variant `{name}`", def.name)))?;
         let shown = format!("{}.{name}", def.name);
         let fields: Vec<_> =
-            def.variants[index].fields.iter().map(|f| (f.name.clone(), f.ty.clone(), None)).collect();
+            def.variants[index].fields.iter().map(|f| (f.name.clone(), f.ty.clone(), f.default.clone())).collect();
         let mut values = order_args(&shown, &fields, args, span)?;
         for (value, (_, ty, _)) in values.iter_mut().zip(&fields) {
             self.check_value(value, ty)?;

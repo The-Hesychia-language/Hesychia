@@ -23,11 +23,17 @@ impl Parser {
 
     /// A declaration, with the decorators written above it.
     fn parse_item(&mut self) -> Result<Item> {
+        let doc = self.doc();
         let mut decorators = Vec::new();
         while self.at(&Tok::Sym(Sym::At)) {
             decorators.push(self.parse_decorator()?);
         }
         let mut item = self.parse_bare_item()?;
+        match &mut item {
+            Item::Struct(s) => s.doc = doc,
+            Item::Enum(e) => e.doc = doc,
+            _ => {}
+        }
         match &mut item {
             Item::Fn(f) => f.decorators = decorators,
             Item::Struct(s) => s.decorators = decorators,

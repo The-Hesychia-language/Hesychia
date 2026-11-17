@@ -1,0 +1,76 @@
+from io import print
+
+# Copies files.
+# On two lines.
+manual struct Options:
+    # The file to read
+    source: str
+    # How many times
+    retries: i64 = 3
+    verbose: bool = False   # not a doc
+    report: Optional[str]
+
+    # Says hello
+    method hello(&self) -> str:
+        return "hi"
+
+# What to do
+manual enum Command:
+    # Build it
+    Build(release: bool = False, jobs: i64 = 4)
+    # Run it
+    Run(path: str, watch: bool = False)
+    Clean
+
+manual fn describe[T]() -> str:
+    mut out: str = doc(T) + "|"
+    comptime for f in fields(T):
+        out += f"{f.name}:{f.doc}:{f.has_default};"
+    return out
+
+manual fn set[T](out: &mut T, text: &str):
+    comptime if T == str:
+        out = text.copy()
+    else:
+        pass
+
+manual fn cases[T](wanted: &str) -> Optional[T]:
+    comptime for v in variants(T):
+        print(f"{v.name}: {v.doc}")
+        if wanted == v.name:
+            mut made: T = empty[T](v)
+            comptime for f in fields(v):
+                print(f"  {f.name} {f.has_default} = [{field(made, f)}]")
+                set(&mut field(made, f), "main.hsy")
+            return made
+    return None
+
+managed fn main():
+    print(describe[Options]())
+    o = Options(source="a", report=None)
+    print(f"{o.retries} {o.verbose} {o.report}")
+    e = empty[Options]()
+    print(f"{e.retries} [{e.source}]")
+    c = cases[Command]("Run")
+    if c is not None:
+        match c:
+            case Command.Run(path, watch):
+                print(f"run {path} {watch}")
+            case _:
+                print("other")
+    b = Command.Build(jobs=8)
+    match b:
+        case Command.Build(release, jobs):
+            print(f"build {release} {jobs}")
+        case _:
+            pass
+# expect: Copies files.
+# expect: On two lines.|source:The file to read:False;retries:How many times:True;verbose::True;report::False;
+# expect: 3 False None
+# expect: 3 []
+# expect: Build: Build it
+# expect: Run: Run it
+# expect:   path False = []
+# expect:   watch True = [False]
+# expect: run main.hsy False
+# expect: build False 8

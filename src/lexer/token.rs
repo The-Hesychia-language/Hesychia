@@ -23,6 +23,9 @@ pub enum Tok {
 pub struct Token {
     pub tok: Tok,
     pub span: Span,
+    /// The comment lines right above the token's line, when it starts that line: what
+    /// documents a struct, a field or an enum case.
+    pub doc: Option<String>,
 }
 
 macro_rules! keywords {

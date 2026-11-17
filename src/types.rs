@@ -374,11 +374,17 @@ pub struct FieldDef {
     pub name: String,
     pub ty: Type,
     pub private: bool,
+    /// The value of the field when it is not given.
+    pub default: Option<crate::comptime::Value>,
+    /// The comment above the field.
+    pub doc: String,
 }
 
 pub struct StructDef {
     pub name: String,
     pub module: usize,
+    /// The comment above the struct.
+    pub doc: String,
     pub fields: Vec<FieldDef>,
     /// C names of the methods implementing built-in traits: `add`, `equal`, `drop`...
     pub operators: std::collections::HashMap<String, String>,
@@ -398,11 +404,14 @@ impl StructDef {
 pub struct VariantDef {
     pub name: String,
     pub fields: Vec<FieldDef>,
+    pub doc: String,
 }
 
 pub struct EnumDef {
     pub name: String,
     pub module: usize,
+    /// The comment above the enum.
+    pub doc: String,
     /// No variant carries data: known from the declaration, before the variants' types.
     pub plain: bool,
     pub variants: Vec<VariantDef>,

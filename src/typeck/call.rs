@@ -116,8 +116,11 @@ impl Checker<'_> {
                 expr.kind = ExprKind::Int(value);
                 return Ok(Type::Int(IntTy::Size));
             }
-            "empty" if type_args.len() == 1 && args.is_empty() && self.global("empty").is_none() => {
+            "empty" if type_args.len() == 1 && args.len() <= 1 && self.global("empty").is_none() => {
                 return self.check_empty(expr);
+            }
+            "doc" if type_args.is_empty() && args.len() == 1 && self.global("doc").is_none() => {
+                return self.check_doc(expr);
             }
             "range" => return Err(Diagnostic::error(span, "`range` can only be used in a `for` loop")),
             _ if !type_args.is_empty() && !self.is_generic_fn(callee) => {
@@ -243,7 +246,7 @@ impl Checker<'_> {
             ));
         }
         let ty = Type::Struct(Named { id, name: def.name.clone() });
-        let fields: Vec<_> = def.fields.iter().map(|f| (f.name.clone(), f.ty.clone(), None)).collect();
+        let fields: Vec<_> = def.fields.iter().map(|f| (f.name.clone(), f.ty.clone(), f.default.clone())).collect();
         let mut values = order_args(callee, &fields, std::mem::take(args), span)?;
         for (value, (_, field_ty, _)) in values.iter_mut().zip(&fields) {
             self.check_value(value, field_ty)?;
@@ -779,6 +782,17 @@ impl Checker<'_> {
         let ExprKind::Field { base, name } = &mut expr.kind else { unreachable!("called on a field") };
         let ty = self.check_expr(base, None)?;
         let ty = deref_heap(base, ty);
+        // `as.Case.field`, which `field(x, f)` makes in a `comptime for` over the cases of an
+        // enum: a field of the case that `x` is.
+        if let (Type::Enum { named, .. }, Some((case, field))) =
+            (&ty, name.strip_prefix("as.").and_then(|rest| rest.split_once('.')))
+        {
+            let variants = &self.tables.types.enums[named.id].variants;
+            let found = variants.iter().find(|v| v.name == case).and_then(|v| v.fields.iter().find(|f| f.name == field));
+            if let Some(found) = found {
+                return Ok(found.ty.clone());
+            }
+        }
         let Type::Struct(named) = &ty else {
             return Err(Diagnostic::error(span, format!("`{ty}` has no field `{name}`")));
         };
@@ -1103,7 +1117,7 @@ fn not_iterable(span: Span) -> Diagnostic {
 }
 
 /// The literal form of a compile-time value.
-fn literal(value: Value) -> ExprKind {
+pub(super) fn literal(value: Value) -> ExprKind {
     match value {
         Value::Int(v) => ExprKind::Int(v),
         Value::Float(v) => ExprKind::Float(v),

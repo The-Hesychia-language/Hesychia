@@ -152,6 +152,8 @@ pub struct StructDecl {
     pub methods: Vec<FnDecl>,
     /// `@packed`, `@align(N)`.
     pub decorators: Vec<Decorator>,
+    /// The comment above the struct.
+    pub doc: String,
     pub span: Span,
 }
 
@@ -206,6 +208,10 @@ pub struct FieldDecl {
     pub private: bool,
     pub name: String,
     pub ty: TypeExpr,
+    /// `count: i64 = 10`: the value when the field is not given.
+    pub default: Option<Expr>,
+    /// The comment above the field.
+    pub doc: String,
     pub span: Span,
 }
 
@@ -216,6 +222,8 @@ pub struct EnumDecl {
     pub name: String,
     pub generics: Vec<GenericParam>,
     pub variants: Vec<VariantDecl>,
+    /// The comment above the enum.
+    pub doc: String,
     pub span: Span,
 }
 
@@ -223,6 +231,8 @@ pub struct EnumDecl {
 pub struct VariantDecl {
     pub name: String,
     pub fields: Vec<FieldDecl>,
+    /// The comment above the case.
+    pub doc: String,
     pub span: Span,
 }
 

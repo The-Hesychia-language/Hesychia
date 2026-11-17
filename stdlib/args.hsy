@@ -1,0 +1,321 @@
+# args: the command line, read into a struct that describes it.
+#
+#     # Copies a file.
+#     managed struct Options:
+#         # The file to read
+#         source: str                  a word that must be given:  copy a.txt
+#         # How many times to try
+#         retries: i64 = 3             an option, with its default: --retries 5
+#         # Say what is being done
+#         verbose: bool = False        a flag:                      --verbose
+#         report: Optional[str]        an option that may be left out
+#         rest: vector[str]            every word left over
+#
+#     options = args.parse[Options]()
+#
+# A field `dry_run` is the option `--dry-run`. The comments above the struct and its fields
+# are the text of `--help`. With an enum, each case is a command: `tool build --release`
+# gives `Command.Build(release=True)`.
+
+import os
+from io import print, stderr
+
+# A command line that does not fit what the program takes.
+manual struct ArgsError:
+    reason: str
+
+# The command line sorted out: what each `--option` was given, and the other words, of
+# which `next` have been taken.
+priv manual struct Words:
+    options: dict[str, vector[str]]
+    others: vector[str]
+    next: size
+
+# The lines of a help text, in two columns, and the words of its usage line.
+priv manual struct Help:
+    usage: str
+    names: vector[str]
+    texts: vector[str]
+
+priv manual fn text_of(bytes: &vector[u8]) -> str:
+    const text: Optional[str] = str.from_bytes(bytes)
+    if text is None:
+        return ""
+    return text
+
+# The option of a field: `dry_run` is `--dry-run`.
+priv manual fn option_of(field: &str) -> str:
+    return "--" + field.replace("_", "-")
+
+# The command of a case: `DryRun` is `dry-run`.
+priv manual fn command_of(name: &str) -> str:
+    mut out: vector[u8] = []
+    for i in range(byte_len(name)):
+        const b: u8 = name.byte(i)
+        if b >= 65 and b <= 90:
+            if i > 0:
+                out.push(45)
+            out.push(b + 32)
+        else:
+            out.push(b)
+    return text_of(&out)
+
+priv manual fn is_flag[F](_slot: &F) -> bool:
+    comptime if F == bool:
+        return True
+    else:
+        return False
+
+priv comptime fn is_int(F: type) -> bool:
+    return F == i8 or F == i16 or F == i32 or F == i64 or F == u8 or F == u16 or F == u32 or F == u64 or F == size
+
+# Whether `word` is written like a number, so that `-5` is not taken for an option.
+priv manual fn is_number(word: &str) -> bool:
+    return byte_len(word) > 1 and word.byte(1) >= 48 and word.byte(1) <= 57
+
+# Sorts the words from `start` on. `flags` are the options that take no value.
+priv manual fn sort_out(words: &vector[str], start: size, flags: &vector[str]) -> Words raises ArgsError:
+    mut sorted: Words = Words(options=dict[str, vector[str]](), others=[], next=0)
+    mut plain: bool = False
+    mut i: size = start
+    while i < len(words):
+        const word: str = words[i].copy()
+        i += 1
+        if plain or not word.starts_with("-") or word == "-" or is_number(&word):
+            sorted.others.push(word)
+        elif word == "--":
+            # Everything after `--` is a word, whatever it looks like.
+            plain = True
+        elif not word.starts_with("--"):
+            raise ArgsError(reason=f"unknown option `{word}`")
+        else:
+            mut name: str = word.copy()
+            mut value: Optional[str] = None
+            const equal: Optional[size] = word.find("=")
+            if equal is not None:
+                name = word[:equal]
+                value = word[equal + 1:]
+            if flags.contains(&name):
+                if value is not None:
+                    raise ArgsError(reason=f"`{name}` takes no value")
+                value = "true"
+            elif value is None:
+                if i >= len(words):
+                    raise ArgsError(reason=f"`{name}` needs a value")
+                value = words[i].copy()
+                i += 1
+            if name not in sorted.options:
+                sorted.options[name.copy()] = []
+            if value is not None:
+                sorted.options[name].push(value)
+    return sorted
+
+# Sets `slot` from the text given for `shown`.
+priv manual fn convert[F](slot: &mut F, text: &str, shown: &str) raises ArgsError:
+    comptime if F == str:
+        slot = text.copy()
+    elif is_int(F):
+        try:
+            const fit: Optional[F] = F.checked(check i64(text))
+            if fit is None:
+                raise ArgsError(reason=f"{shown}: `{text}` is too large")
+            slot = fit
+        except ParseError as _e:
+            raise ArgsError(reason=f"{shown}: `{text}` is not a whole number")
+    elif F == f64:
+        try:
+            slot = check f64(text)
+        except ParseError as _e:
+            raise ArgsError(reason=f"{shown}: `{text}` is not a number")
+    elif F == Optional:
+        mut one: item(F) = empty[item(F)]()
+        check convert(&mut one, text, shown)
+        slot = one
+    else:
+        comptime assert(False, "args reads `str`, whole numbers, `f64` and `bool`, an `Optional` or a `vector` of them")
+
+# Gives the field `name` what the command line has for it.
+priv manual fn take[F](slot: &mut F, name: &str, has_default: bool, words: &mut Words) raises ArgsError:
+    const option: str = option_of(name)
+    const word: str = f"<{name}>"
+    comptime if F == bool:
+        if option in words.options:
+            slot = True
+            words.options.remove(&option)
+    elif F == vector:
+        while words.next < len(words.others):
+            mut one: item(F) = empty[item(F)]()
+            check convert(&mut one, &words.others[words.next], &word)
+            slot.push(one)
+            words.next += 1
+    else:
+        if has_default or is_optional(slot):
+            const given: Optional[vector[str]] = words.options.remove(&option)
+            if given is not None:
+                check convert(slot, &given[len(given) - 1], &option)
+        elif words.next < len(words.others):
+            check convert(slot, &words.others[words.next], &word)
+            words.next += 1
+        else:
+            raise ArgsError(reason=f"{word} is missing")
+
+priv manual fn is_optional[F](_slot: &F) -> bool:
+    comptime if F == Optional:
+        return True
+    else:
+        return False
+
+# What is left once every field has taken its part is not understood.
+priv manual fn finish(words: &Words) raises ArgsError:
+    const unknown: vector[str] = words.options.keys()
+    if len(unknown) > 0:
+        raise ArgsError(reason=f"unknown option `{unknown[0]}`")
+    if words.next < len(words.others):
+        raise ArgsError(reason=f"unexpected `{words.others[words.next]}`")
+
+# `words` read as a `T`: a struct, or an enum whose first word names the case. `words` are
+# the words after the program's name.
+manual fn to_struct[T](words: &vector[str]) -> T raises ArgsError:
+    mut flags: vector[str] = []
+    comptime if is_enum(T):
+        if len(words) == 0:
+            raise ArgsError(reason="a command is missing")
+        comptime for v in variants(T):
+            if words[0] == command_of(v.name):
+                mut made: T = empty[T](v)
+                comptime for f in fields(v):
+                    if is_flag(&field(made, f)):
+                        flags.push(option_of(f.name))
+                mut sorted: Words = check sort_out(words, 1, &flags)
+                comptime for f in fields(v):
+                    check take(&mut field(made, f), f.name, f.has_default, &mut sorted)
+                check finish(&sorted)
+                return made
+        raise ArgsError(reason=f"unknown command `{words[0]}`")
+    else:
+        mut made: T = empty[T]()
+        comptime for f in fields(T):
+            if is_flag(&field(made, f)):
+                flags.push(option_of(f.name))
+        mut sorted: Words = check sort_out(words, 0, &flags)
+        comptime for f in fields(T):
+            check take(&mut field(made, f), f.name, f.has_default, &mut sorted)
+        check finish(&sorted)
+        return made
+
+# --- help ---------------------------------------------------------------------------------
+
+# How the value of an option is shown: `<n>` for a number, `<text>` for a text.
+priv manual fn kind[F](_slot: &F) -> str:
+    comptime if F == str:
+        return "<text>"
+    elif F == Optional:
+        const inner: item(F) = empty[item(F)]()
+        return kind(&inner)
+    else:
+        return "<n>"
+
+# Adds the line of the field `name` to `help`.
+priv manual fn describe[F](slot: &F, name: &str, doc: &str, has_default: bool, help: &mut Help):
+    mut text: str = doc.replace("\n", " ")
+    comptime if F == bool:
+        help.names.push(option_of(name))
+    elif F == vector:
+        help.usage += f" [{name}...]"
+        help.names.push(f"<{name}>...")
+    else:
+        if has_default:
+            if len(text) > 0:
+                text += " "
+            text += f"(default: {slot})"
+        if has_default or is_optional(slot):
+            help.names.push(f"{option_of(name)} {kind(slot)}")
+        else:
+            help.usage += f" <{name}>"
+            help.names.push(f"<{name}>")
+    help.texts.push(text)
+
+# The text of `help`: what the program does, how it is called, and its lines in two columns.
+priv manual fn laid_out(about: &str, help: &Help) -> str:
+    mut out: str = ""
+    if len(about) > 0:
+        out += f"{about}\n\n"
+    out += f"Usage: {help.usage}\n"
+    mut width: size = 0
+    for name in &help.names:
+        if len(name) > width:
+            width = len(name)
+    for i in range(len(help.names)):
+        out += f"\n  {help.names[i]}"
+        if len(help.texts[i]) > 0:
+            for _ in range(width - len(help.names[i]) + 3):
+                out += " "
+            out += help.texts[i]
+    return out
+
+# What `--help` writes for a program called `program`, from the comments of `T`. For an
+# enum, `command` names the case to say more about; "" lists the commands.
+manual fn help[T](program: &str, command: &str = "") -> str:
+    mut made: Help = Help(usage=f"{program}", names=[], texts=[])
+    const about: str = doc(T)
+    comptime if is_enum(T):
+        comptime for v in variants(T):
+            if command == command_of(v.name):
+                made.usage += f" {command}"
+                const shown: T = empty[T](v)
+                comptime for f in fields(v):
+                    describe(&field(shown, f), f.name, f.doc, f.has_default, &mut made)
+                made.usage += " [options]"
+                made.names.push("--help")
+                made.texts.push("Show this help")
+                return laid_out(v.doc, &made)
+        made.usage += " <command> [options]"
+        comptime for v in variants(T):
+            made.names.push(command_of(v.name))
+            made.texts.push(v.doc.replace("\n", " "))
+        return laid_out(&about, &made) + f"\n\n`{program} <command> --help` says more about a command."
+    else:
+        const start: T = empty[T]()
+        comptime for f in fields(T):
+            describe(&field(start, f), f.name, f.doc, f.has_default, &mut made)
+        made.usage += " [options]"
+        made.names.push("--help")
+        made.texts.push("Show this help")
+        return laid_out(&about, &made)
+
+# The program's name, as it was called: the last part of its path.
+priv manual fn program_name(path: &str) -> str:
+    mut start: size = 0
+    for i in range(byte_len(path)):
+        if path.byte(i) == 47 or path.byte(i) == 92:
+            start = i + 1
+    mut out: vector[u8] = []
+    for i in range(start, byte_len(path)):
+        out.push(path.byte(i))
+    return text_of(&out)
+
+# The command line of the program, read as a `T`. `--help` writes the help and ends the
+# program; a command line that does not fit writes why, and ends it with the code 2.
+manual fn parse[T]() -> T:
+    const all: vector[str] = os.args()
+    mut program: str = "program"
+    mut words: vector[str] = []
+    if len(all) > 0:
+        program = program_name(&all[0])
+        words = all[1:]
+    mut command: str = ""
+    for i in range(len(words)):
+        if words[i] == "--":
+            break
+        if words[i] == "--help" or words[i] == "-h":
+            print(help[T](&program, &command))
+            os.exit(0)
+        if i == 0:
+            command = words[0].copy()
+    try:
+        return check to_struct[T](&words)
+    except ArgsError as e:
+        print(f"error: {e.reason}\nTry `{program} --help`.", to=stderr)
+        os.exit(2)
+    while True:
+        pass

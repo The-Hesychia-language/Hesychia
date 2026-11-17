@@ -37,6 +37,7 @@ impl Parser {
             fields,
             methods,
             decorators: Vec::new(),
+            doc: String::new(),
             span,
         })
     }
@@ -98,6 +99,7 @@ impl Parser {
         self.open_body()?;
         while !self.eat(&Tok::Dedent) {
             let span = self.span();
+            let doc = self.doc();
             let name = self.expect_ident()?;
             let mut fields = Vec::new();
             if self.eat_sym(Sym::LParen) {
@@ -109,9 +111,9 @@ impl Parser {
                 }
             }
             self.expect_newline()?;
-            variants.push(VariantDecl { name, fields, span });
+            variants.push(VariantDecl { name, fields, doc, span });
         }
-        Ok(EnumDecl { level, private, name, generics, variants, span })
+        Ok(EnumDecl { level, private, name, generics, variants, doc: String::new(), span })
     }
 
     fn open_body(&mut self) -> Result<()> {
@@ -127,11 +129,13 @@ impl Parser {
 
     fn parse_field(&mut self) -> Result<FieldDecl> {
         let span = self.span();
+        let doc = self.doc();
         let private = self.eat_kw(Kw::Priv);
         let name = self.expect_ident()?;
         self.expect_sym(Sym::Colon)?;
         let ty = self.parse_type()?;
-        Ok(FieldDecl { private, name, ty, span })
+        let default = if self.eat_sym(Sym::Assign) { Some(self.parse_expr()?) } else { None };
+        Ok(FieldDecl { private, name, ty, default, doc, span })
     }
 
     /// `method name(self-or-params) [-> T]: body`; the method takes the struct's level.

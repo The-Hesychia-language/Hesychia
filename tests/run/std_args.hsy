@@ -1,0 +1,133 @@
+from io import print
+import args
+
+# Copies files, and counts what it copied.
+managed struct Options:
+    # The file to read
+    source: str
+    # Where to write it
+    target: str
+    # How many times to try again
+    retries: i64 = 3
+    # Say what is being done
+    verbose: bool = False
+    # Write a report to this file
+    report: Optional[str]
+    dry_run: bool = False
+
+manual struct Sum:
+    # How much each number counts
+    scale: f64 = 1.0
+    limit: Optional[u8]
+    # The numbers to add
+    numbers: vector[i32]
+
+# A tool with commands.
+manual enum Command:
+    # Build the project
+    Build(release: bool = False, jobs: i64 = 4)
+    # Run a file,
+    # then wait.
+    Run(path: str, watch: bool = False)
+    DryRun
+
+managed fn copy(words: vector[str]):
+    try:
+        o = args.to_struct[Options](words)
+        print(f"{o.source} {o.target} {o.retries} {o.verbose} {o.report} {o.dry_run}")
+    except ArgsError as e:
+        print(f"error: {e.reason}")
+
+managed fn command(words: vector[str]):
+    try:
+        match args.to_struct[Command](words):
+            case Command.Build(release, jobs):
+                print(f"build {release} {jobs}")
+            case Command.Run(path, watch):
+                print(f"run {path} {watch}")
+            case Command.DryRun:
+                print("dry run")
+    except ArgsError as e:
+        print(f"error: {e.reason}")
+
+managed fn main():
+    copy(["a.txt", "b.txt"])
+    copy(["--retries", "5", "a.txt", "--verbose", "b.txt", "--report=out.md", "--dry-run"])
+    copy(["--", "--a", "-b"])
+    copy(["a.txt"])
+    copy(["a", "b", "c"])
+    copy(["a", "b", "--retries", "many"])
+    copy(["a", "b", "--retries"])
+    copy(["a", "b", "--color", "red"])
+    copy(["a", "b", "--verbose=yes"])
+    copy(["a", "b", "-v"])
+    sum = args.to_struct[Sum](["1", "-2", "30", "--limit", "9", "--scale", "0.5"])
+    print(f"{sum.numbers} {sum.limit} {sum.scale}")
+    try:
+        args.to_struct[Sum](["--limit", "300"])
+    except ArgsError as e:
+        print(f"error: {e.reason}")
+    command(["build"])
+    command(["build", "--release", "--jobs", "8"])
+    command(["run", "main.hsy", "--watch"])
+    command(["dry-run"])
+    command(["run"])
+    command(["deploy"])
+    command(vector[str]())
+    print(args.help[Options]("copy").replace("\n\n", "\n.\n"))
+    print(args.help[Sum]("sum").replace("\n\n", "\n.\n"))
+    print(args.help[Command]("tool").replace("\n\n", "\n.\n"))
+    print(args.help[Command]("tool", "run").replace("\n\n", "\n.\n"))
+# expect: a.txt b.txt 3 False None False
+# expect: a.txt b.txt 5 True 'out.md' True
+# expect: --a -b 3 False None False
+# expect: error: <target> is missing
+# expect: error: unexpected `c`
+# expect: error: --retries: `many` is not a whole number
+# expect: error: `--retries` needs a value
+# expect: error: unknown option `--color`
+# expect: error: `--verbose` takes no value
+# expect: error: unknown option `-v`
+# expect: [1, -2, 30] 9 0.5
+# expect: error: --limit: `300` is too large
+# expect: build False 4
+# expect: build True 8
+# expect: run main.hsy True
+# expect: dry run
+# expect: error: <path> is missing
+# expect: error: unknown command `deploy`
+# expect: error: a command is missing
+# expect: Copies files, and counts what it copied.
+# expect: .
+# expect: Usage: copy <source> <target> [options]
+# expect: .
+# expect:   <source>          The file to read
+# expect:   <target>          Where to write it
+# expect:   --retries <n>     How many times to try again (default: 3)
+# expect:   --verbose         Say what is being done
+# expect:   --report <text>   Write a report to this file
+# expect:   --dry-run
+# expect:   --help            Show this help
+# expect: Usage: sum [numbers...] [options]
+# expect: .
+# expect:   --scale <n>    How much each number counts (default: 1.0)
+# expect:   --limit <n>
+# expect:   <numbers>...   The numbers to add
+# expect:   --help         Show this help
+# expect: A tool with commands.
+# expect: .
+# expect: Usage: tool <command> [options]
+# expect: .
+# expect:   build     Build the project
+# expect:   run       Run a file, then wait.
+# expect:   dry-run
+# expect: .
+# expect: `tool <command> --help` says more about a command.
+# expect: Run a file,
+# expect: then wait.
+# expect: .
+# expect: Usage: tool run <path> [options]
+# expect: .
+# expect:   <path>
+# expect:   --watch
+# expect:   --help    Show this help

@@ -486,16 +486,24 @@ impl Collector<'_> {
                 let plain = e.variants.iter().all(|v| v.fields.is_empty());
                 // The names are known from here on, for `comptime` constants; the fields come
                 // with the other types, and until then only say whether a variant has any.
-                let unknown = || FieldDef { name: String::new(), ty: Type::Void, private: false };
+                let unknown = || FieldDef {
+                    name: String::new(),
+                    ty: Type::Void,
+                    private: false,
+                    default: None,
+                    doc: String::new(),
+                };
                 let variants = e
                     .variants
                     .iter()
                     .map(|v| VariantDef {
                         name: v.name.clone(),
                         fields: v.fields.iter().map(|_| unknown()).collect(),
+                        doc: v.doc.clone(),
                     })
                     .collect();
-                let def = EnumDef { name: e.name.clone(), module: self.module, plain, variants };
+                let doc = e.doc.clone();
+                let def = EnumDef { name: e.name.clone(), module: self.module, doc, plain, variants };
                 self.tables.types.enums.push(def);
                 let symbol = Symbol::Enum(self.tables.types.enums.len() - 1);
                 self.export(&e.name, symbol, e.private, e.span)
@@ -528,6 +536,7 @@ impl Collector<'_> {
         let def = StructDef {
             name: s.name.clone(),
             module: self.module,
+            doc: s.doc.clone(),
             fields: Vec::new(),
             operators: HashMap::new(),
             packed,
@@ -719,7 +728,9 @@ impl Signer<'_> {
             if s.level == Level::Managed {
                 ty = boxed_self(ty, id);
             }
-            fields.push(FieldDef { name: field.name.clone(), ty, private: field.private });
+            let default = self.field_default(field, &ty)?;
+            let doc = field.doc.clone();
+            fields.push(FieldDef { name: field.name.clone(), ty, private: field.private, default, doc });
         }
         self.tables.types.structs[id].fields = fields;
         let owner = Type::Struct(Named { id, name: s.name.clone() });
@@ -758,12 +769,13 @@ impl Signer<'_> {
                 return Err(Diagnostic::error(variant.span, "`managed` enums cannot carry data")
                     .with_hint("declare a `manual enum` for variants with fields"));
             }
-            let fields = variant
-                .fields
-                .iter()
-                .map(|f| Ok(FieldDef { name: f.name.clone(), ty: self.field_type(&f.ty)?, private: false }))
-                .collect::<Result<_>>()?;
-            variants.push(VariantDef { name: variant.name.clone(), fields });
+            let mut fields = Vec::new();
+            for f in &variant.fields {
+                let ty = self.field_type(&f.ty)?;
+                let default = self.field_default(f, &ty)?;
+                fields.push(FieldDef { name: f.name.clone(), ty, private: false, default, doc: f.doc.clone() });
+            }
+            variants.push(VariantDef { name: variant.name.clone(), fields, doc: variant.doc.clone() });
         }
         self.tables.types.enums[id].variants = variants;
         Ok(())
@@ -922,6 +934,14 @@ impl Signer<'_> {
 
     fn params(&mut self, params: &[Param], level: Level) -> Result<Vec<ParamSig>> {
         params.iter().map(|p| self.param(p, level)).collect()
+    }
+
+    /// `count: i64 = 10`: the value of a field that is not given, known when compiling.
+    fn field_default(&mut self, field: &crate::ast::FieldDecl, ty: &Type) -> Result<Option<Value>> {
+        let Some(expr) = &field.default else { return Ok(None) };
+        let value = self.eval(expr)?;
+        comptime::check_fits(&value, ty, expr.span)?;
+        Ok(Some(value))
     }
 
     fn param(&mut self, p: &Param, level: Level) -> Result<ParamSig> {

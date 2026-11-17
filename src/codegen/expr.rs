@@ -41,7 +41,9 @@ impl Emitter<'_> {
     fn emit_field(&mut self, expr: &Expr, base: &Expr, name: &str) -> String {
         let base_code = self.emit_expr(base);
         let drop = if super::stmt::is_place(base) { None } else { self.types.drop_fn(base.ty()) };
-        let Some(drop) = drop else { return format!("{base_code}.{}", c_ident(name)) };
+        // `as.Case.field` reaches into an enum: each part is a C name of its own.
+        let path = name.split('.').map(c_ident).collect::<Vec<_>>().join(".");
+        let Some(drop) = drop else { return format!("{base_code}.{path}") };
         let (whole, part) = (self.types.c_type(base.ty()), self.types.c_type(expr.ty()));
         let (temp, field) = (self.temp("whole"), self.temp("part"));
         let taken = if self.types.table.needs_drop(expr.ty()) {

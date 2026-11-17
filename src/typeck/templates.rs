@@ -193,6 +193,7 @@ impl Tables {
         let def = StructDef {
             name: name.clone(),
             module,
+            doc: decl.doc.clone(),
             fields: Vec::new(),
             operators: HashMap::new(),
             packed: false,
@@ -211,7 +212,13 @@ impl Tables {
             if matches!(ty, Type::Ref(..)) {
                 return Err(Diagnostic::error(field.span, "a field cannot hold a reference"));
             }
-            fields.push(FieldDef { name: field.name.clone(), ty, private: field.private });
+            fields.push(FieldDef {
+                name: field.name.clone(),
+                ty,
+                private: field.private,
+                default: None,
+                doc: field.doc.clone(),
+            });
         }
         self.types.structs[id].fields = fields;
         let concrete = !args.iter().any(|t| self.has_param(t));
@@ -371,7 +378,7 @@ impl Tables {
         let (decl, module, params) = (decl.clone(), *module, params.clone());
         let name = display(&decl.name, &args);
         let plain = decl.variants.iter().all(|v| v.fields.is_empty());
-        self.types.enums.push(EnumDef { name, module, plain, variants: Vec::new() });
+        self.types.enums.push(EnumDef { name, module, doc: decl.doc.clone(), plain, variants: Vec::new() });
         let id = self.types.enums.len() - 1;
         self.templates.made.insert((Kind::Enum, template, args.clone()), id);
         let mut extra: Vec<(String, Type)> = params.into_iter().zip(args.iter().cloned()).collect();
@@ -384,9 +391,10 @@ impl Tables {
                 if matches!(ty, Type::Ref(..)) {
                     return Err(Diagnostic::error(field.span, "a field cannot hold a reference"));
                 }
-                fields.push(FieldDef { name: field.name.clone(), ty, private: false });
+                let doc = field.doc.clone();
+                fields.push(FieldDef { name: field.name.clone(), ty, private: false, default: None, doc });
             }
-            variants.push(VariantDef { name: variant.name.clone(), fields });
+            variants.push(VariantDef { name: variant.name.clone(), fields, doc: variant.doc.clone() });
         }
         self.types.enums[id].variants = variants;
         if !args.iter().any(|t| self.has_param(t)) {

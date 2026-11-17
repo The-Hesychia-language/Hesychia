@@ -22,6 +22,10 @@ struct Lexer {
     bracket_depth: usize,
     line_start: bool,
     symbols: Vec<Sym>,
+    /// Comment lines not yet followed by code or a blank line.
+    doc: Vec<String>,
+    /// A token was read on the current line.
+    line_has_token: bool,
 }
 
 impl Lexer {
@@ -38,6 +42,8 @@ impl Lexer {
             bracket_depth: 0,
             line_start: true,
             symbols: Sym::all_longest_first(),
+            doc: Vec::new(),
+            line_has_token: false,
         }
     }
 
@@ -63,6 +69,7 @@ impl Lexer {
     fn lex_newline(&mut self) {
         let span = self.span();
         self.advance();
+        self.line_has_token = false;
         if self.bracket_depth == 0 && self.needs_newline() {
             self.push(Tok::Newline, span);
         }
@@ -73,9 +80,16 @@ impl Lexer {
         !matches!(self.tokens.last().map(|t| &t.tok), None | Some(Tok::Newline | Tok::Indent | Tok::Dedent))
     }
 
+    /// A comment alone on its line may document what follows it.
     fn skip_comment(&mut self) {
-        while self.peek().is_some_and(|c| c != '\n') {
+        let mut text = String::new();
+        while let Some(c) = self.peek().filter(|&c| c != '\n') {
+            text.push(c);
             self.advance();
+        }
+        if !self.line_has_token && self.bracket_depth == 0 {
+            let text = text.trim_start_matches('#');
+            self.doc.push(text.strip_prefix(' ').unwrap_or(text).trim_end().to_string());
         }
     }
 
@@ -91,6 +105,10 @@ impl Lexer {
             self.advance();
         }
         if matches!(self.peek(), None | Some('\n' | '#' | '\r')) {
+            if self.peek() != Some('#') {
+                // A blank line parts a comment from the code below it.
+                self.doc.clear();
+            }
             return Ok(()); // blank or comment-only line: no block change
         }
         if let Some(c) = used {
@@ -431,7 +449,14 @@ impl Lexer {
     }
 
     fn push(&mut self, tok: Tok, span: Span) {
-        self.tokens.push(Token { tok, span });
+        let mut doc = None;
+        if !matches!(tok, Tok::Newline | Tok::Indent | Tok::Dedent) {
+            if !self.doc.is_empty() {
+                doc = Some(std::mem::take(&mut self.doc).join("\n"));
+            }
+            self.line_has_token = true;
+        }
+        self.tokens.push(Token { tok, span, doc });
     }
 
     fn span(&self) -> Span {
