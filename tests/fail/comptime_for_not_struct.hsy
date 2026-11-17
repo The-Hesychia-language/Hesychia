@@ -1,0 +1,9 @@
+manual fn count[T]() -> i32:
+    mut n: i32 = 0
+    comptime for f in fields(T):
+        n += 1
+    return n
+
+manual fn main():
+    const _n: i32 = count[i64]()
+# error: `i64` is not a struct: it has no fields to go over

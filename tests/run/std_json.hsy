@@ -35,7 +35,7 @@ managed fn main():
             print(f"{e.at}: {e.reason}")
     fs.remove("hsy-json-test.json")
     parsed = json.parse("[1, {\"a\": null}]")
-    print(f"{json.text(parsed)} {json.text(json.parse("[]"), indent=2)}")
+    print(f"{json.to_text(parsed)} {json.to_text(json.parse("[]"), indent=2)}")
     try:
         json.parse("[1,")
     except JsonError as e:

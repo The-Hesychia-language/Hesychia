@@ -75,7 +75,8 @@ impl Parser {
                     }
                 }
             }
-            generics.push(GenericParam { name, bounds, span });
+            let default = if self.eat_sym(Sym::Assign) { Some(self.parse_type()?) } else { None };
+            generics.push(GenericParam { name, bounds, default, span });
         }
         Ok(generics)
     }

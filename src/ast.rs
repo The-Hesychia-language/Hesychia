@@ -170,6 +170,8 @@ pub struct ExtendDecl {
 pub struct GenericParam {
     pub name: String,
     pub bounds: Vec<(String, Span)>,
+    /// `[T = Value]`: the type when a call neither gives nor shows one.
+    pub default: Option<TypeExpr>,
     pub span: Span,
 }
 
@@ -328,6 +330,12 @@ pub enum StmtKind {
     Pass,
     Comptime(ComptimeConst),
     ComptimeIf(ComptimeIf<Stmt>),
+    /// `comptime for f in fields(T):`: the body, once for each field of the struct `T`.
+    ComptimeFor {
+        var: String,
+        source: Expr,
+        body: Vec<Stmt>,
+    },
     ComptimeAssert(ComptimeAssert),
     /// The branch selected by a `comptime if`, after checking.
     Block(Vec<Stmt>),

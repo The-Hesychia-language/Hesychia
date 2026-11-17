@@ -1,0 +1,58 @@
+from io import print
+import url
+
+managed fn show(text: str):
+    u = url.parse(text)
+    print(f"{u.scheme}|{u.user}|{u.host}|{u.port}|{u.path}|{u.query}|{u.fragment} -> [{url.to_text(u)}]")
+
+managed fn main():
+    u = url.parse("https://example.com:8080/docs/a%20b?tag=x&tag=y#intro")
+    print(f"{u.scheme} {u.host} {u.path}")
+    if u.port is not None:
+        print(f"port {u.port}")
+    print(f"{u.query["tag"]}")
+    u.path = "/search"
+    u.query["q"] = ["hello world"]
+    print(url.to_text(u))
+    print(url.to_text(url.join(u, "../about")))
+    print(f"{url.encode("a b/c é")} {url.decode("a%20b%2Fc%20%C3%A9")} {url.decode("100%")} {url.decode("%FF")}")
+
+    for text in ["HTTP://Ann:pw@Example.COM/", "http://[::1]:9000/x?a=1+2&b&c=%26", "mailto:ann@example.com", "/only/path?x=1", "file:///etc/hosts", "example.com/a", "?q=é#f g", ""]:
+        show(text)
+
+    base = url.parse("https://example.com/a/b/c?x=1#top")
+    for link in ["d", "../d", "../../../d", "/d/./e/../f", "?y=2", "#end", "//other.org/z", "ftp://h/p", "./", "..", ""]:
+        print(f"{link} -> {url.to_text(url.join(base, link))}")
+
+    for bad in ["http://h:port/", "http://h:70000/"]:
+        try:
+            url.parse(bad)
+        except UrlError as e:
+            print(f"{e.text}: {e.reason}")
+# expect: https example.com /docs/a b
+# expect: port 8080
+# expect: ['x', 'y']
+# expect: https://example.com:8080/search?tag=x&tag=y&q=hello%20world#intro
+# expect: https://example.com:8080/about
+# expect: a%20b%2Fc%20%C3%A9 a b/c é 100% %FF
+# expect: http|Ann:pw|example.com|None|/|{}| -> [http://Ann:pw@example.com/]
+# expect: http||::1|9000|/x|{'a': ['1 2'], 'b': [''], 'c': ['&']}| -> [http://[::1]:9000/x?a=1%202&b=&c=%26]
+# expect: mailto|||None|ann@example.com|{}| -> [mailto:ann@example.com]
+# expect: |||None|/only/path|{'x': ['1']}| -> [/only/path?x=1]
+# expect: file|||None|/etc/hosts|{}| -> [file:/etc/hosts]
+# expect: |||None|example.com/a|{}| -> [example.com/a]
+# expect: |||None||{'q': ['é']}|f g -> [?q=%C3%A9#f%20g]
+# expect: |||None||{}| -> []
+# expect: d -> https://example.com/a/b/d
+# expect: ../d -> https://example.com/a/d
+# expect: ../../../d -> https://example.com/d
+# expect: /d/./e/../f -> https://example.com/d/f
+# expect: ?y=2 -> https://example.com/a/b/c?y=2
+# expect: #end -> https://example.com/a/b/c?x=1#end
+# expect: //other.org/z -> https://other.org/z
+# expect: ftp://h/p -> ftp://h/p
+# expect: ./ -> https://example.com/a/b/
+# expect: .. -> https://example.com/a/
+# expect:  -> https://example.com/a/b/c?x=1
+# expect: http://h:port/: the port is not a number up to 65535
+# expect: http://h:70000/: the port is not a number up to 65535

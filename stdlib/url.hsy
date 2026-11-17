@@ -1,0 +1,302 @@
+# url: takes a URL apart, and puts one together.
+#
+#     u = url.parse("https://example.com:8080/docs/a%20b?tag=x&tag=y#intro")
+#     u.host           "example.com"
+#     u.path           "/docs/a b"
+#     u.query["tag"]   ['x', 'y']
+#
+# What a `Url` holds is decoded: `%20` is a space there, and `to_text` encodes it again.
+
+# A port that is not a number, or is above 65535.
+manual struct UrlError:
+    text: str
+    reason: str
+
+# The parts of a URL. A part the URL does not have is "" (`None` for the port, no entry for
+# the query). `user` is what comes before `@` in "https://ann@example.com".
+manual struct Url:
+    scheme: str
+    user: str
+    host: str
+    port: Optional[i32]
+    path: str
+    query: dict[str, vector[str]]
+    fragment: str
+
+# --- characters -------------------------------------------------------------------------
+
+priv manual fn is_letter(b: u8) -> bool:
+    return (b >= 65 and b <= 90) or (b >= 97 and b <= 122)
+
+priv manual fn is_digit(b: u8) -> bool:
+    return b >= 48 and b <= 57
+
+# Letters, digits, and `-._~`: what never needs encoding.
+priv manual fn is_plain(b: u8) -> bool:
+    return is_letter(b) or is_digit(b) or b == 45 or b == 46 or b == 95 or b == 126
+
+# Whether `b` is one of the bytes of `kept`.
+priv manual fn among(b: u8, kept: &str) -> bool:
+    for i in range(byte_len(kept)):
+        if kept.byte(i) == b:
+            return True
+    return False
+
+priv manual fn hex_value(b: u8) -> Optional[u8]:
+    if is_digit(b):
+        return b - 48
+    if b >= 97 and b <= 102:
+        return b - 87
+    if b >= 65 and b <= 70:
+        return b - 55
+    return None
+
+priv manual fn hex_digit(n: u8) -> u8:
+    if n < 10:
+        return n + 48
+    return n + 55
+
+priv manual fn between(text: &str, start: size, end: size) -> str:
+    mut out: vector[u8] = []
+    for i in range(start, end):
+        out.push(text.byte(i))
+    const piece: Optional[str] = str.from_bytes(&out)
+    if piece is None:
+        return ""
+    return piece
+
+# Where `wanted` first is in `text`, from `start` and before `end`; `end` if it is not there.
+priv manual fn position(text: &str, wanted: u8, start: size, end: size) -> size:
+    for i in range(start, end):
+        if text.byte(i) == wanted:
+            return i
+    return end
+
+# `text` with every byte encoded as `%XX`, but the plain ones and those of `kept`.
+priv manual fn encoded(text: &str, kept: &str) -> str:
+    mut out: vector[u8] = []
+    for i in range(byte_len(text)):
+        const b: u8 = text.byte(i)
+        if is_plain(b) or among(b, kept):
+            out.push(b)
+        else:
+            out.push(37)
+            out.push(hex_digit(b >> 4))
+            out.push(hex_digit(b & 15))
+    const made: Optional[str] = str.from_bytes(&out)
+    if made is None:
+        return ""
+    return made
+
+# `text` from `start` to `end`, with each `%XX` as the byte it stands for, and `+` as a space
+# with `plus`. A `%` that is not followed by two hex digits stays; so does the whole piece,
+# if what it would give is not UTF-8.
+priv manual fn decoded(text: &str, start: size, end: size, plus: bool) -> str:
+    mut out: vector[u8] = []
+    mut i: size = start
+    while i < end:
+        const b: u8 = text.byte(i)
+        mut taken: size = 1
+        mut byte: u8 = b
+        if b == 37 and i + 2 < end:
+            const high: Optional[u8] = hex_value(text.byte(i + 1))
+            const low: Optional[u8] = hex_value(text.byte(i + 2))
+            if high is not None and low is not None:
+                byte = high * 16 + low
+                taken = 3
+        elif b == 43 and plus:
+            byte = 32
+        out.push(byte)
+        i += taken
+    const made: Optional[str] = str.from_bytes(&out)
+    if made is None:
+        return between(text, start, end)
+    return made
+
+# --- encode and decode ---------------------------------------------------------------------
+
+# `text` made safe to put in a URL: every character but letters, digits and `-._~` becomes
+# `%XX`. `url.encode("a b/c")` is "a%20b%2Fc".
+manual fn encode(text: &str) -> str:
+    return encoded(text, "")
+
+# `text` with each `%XX` as the character it stands for: `url.decode("a%20b")` is "a b".
+manual fn decode(text: &str) -> str:
+    return decoded(text, 0, byte_len(text), False)
+
+# --- parse -----------------------------------------------------------------------------------
+
+# How many bytes the scheme of `text` takes, without its `:`; 0 if it has none.
+priv manual fn scheme_len(text: &str) -> size:
+    if byte_len(text) == 0 or not is_letter(text.byte(0)):
+        return 0
+    mut i: size = 1
+    while i < byte_len(text):
+        const b: u8 = text.byte(i)
+        if b == 58:
+            return i
+        if not (is_letter(b) or is_digit(b) or b == 43 or b == 45 or b == 46):
+            return 0
+        i += 1
+    return 0
+
+# Adds the pairs of a query, `a=1&b=2`, which is in `text` from `first` to `last`.
+priv manual fn read_query(text: &str, first: size, last: size, query: &mut dict[str, vector[str]]):
+    mut start: size = first
+    while start < last:
+        const end: size = position(text, 38, start, last)
+        if end > start:
+            const equal: size = position(text, 61, start, end)
+            const name: str = decoded(text, start, equal, True)
+            mut value: str = ""
+            if equal < end:
+                value = decoded(text, equal + 1, end, True)
+            if name not in query:
+                query[name.copy()] = []
+            query[name].push(value)
+        start = end + 1
+
+# The user, host and port: what is between `//` and the path, in `text` from `first` to `last`.
+priv manual fn read_authority(text: &str, first: size, last: size, u: &mut Url) raises UrlError:
+    mut start: size = first
+    for i in range(first, last):
+        if text.byte(i) == 64:
+            u.user = decoded(text, first, i, False)
+            start = i + 1
+    mut port_at: size = last
+    if start < last and text.byte(start) == 91:
+        # An IPv6 address, in brackets: its `:` are not the port's.
+        const close: size = position(text, 93, start, last)
+        u.host = between(text, start + 1, close).lower()
+        if close + 1 < last and text.byte(close + 1) == 58:
+            port_at = close + 2
+    else:
+        const host_end: size = position(text, 58, start, last)
+        u.host = decoded(text, start, host_end, False).lower()
+        if host_end < last:
+            port_at = host_end + 1
+    if port_at < last:
+        mut port: i32 = 0
+        for i in range(port_at, last):
+            const b: u8 = text.byte(i)
+            if not is_digit(b) or port > 65535:
+                raise UrlError(text=text.copy(), reason="the port is not a number up to 65535")
+            port = port * 10 + i32(b - 48)
+        if port > 65535:
+            raise UrlError(text=text.copy(), reason="the port is not a number up to 65535")
+        u.port = port
+
+# The parts of the URL written in `text`.
+manual fn parse(text: &str) -> Url raises UrlError:
+    mut u: Url = Url(scheme="", user="", host="", port=None, path="", query=dict[str, vector[str]](), fragment="")
+    const n: size = byte_len(text)
+    mut at: size = 0
+    const scheme: size = scheme_len(text)
+    if scheme > 0:
+        u.scheme = between(text, 0, scheme).lower()
+        at = scheme + 1
+    const fragment_at: size = position(text, 35, at, n)
+    const query_at: size = position(text, 63, at, fragment_at)
+    if at + 1 < query_at and text.byte(at) == 47 and text.byte(at + 1) == 47:
+        const end: size = position(text, 47, at + 2, query_at)
+        check read_authority(text, at + 2, end, &mut u)
+        at = end
+    u.path = decoded(text, at, query_at, False)
+    if query_at < fragment_at:
+        read_query(text, query_at + 1, fragment_at, &mut u.query)
+    if fragment_at < n:
+        u.fragment = decoded(text, fragment_at + 1, n, False)
+    return u
+
+# --- to_text -----------------------------------------------------------------------------
+
+# The URL that `u` describes, with what needs it encoded.
+manual fn to_text(u: &Url) -> str:
+    mut out: str = ""
+    if len(u.scheme) > 0:
+        out += u.scheme
+        out += ":"
+    if len(u.host) > 0:
+        out += "//"
+        if len(u.user) > 0:
+            out += encoded(&u.user, "!$&'()*+,;=:")
+            out += "@"
+        if u.host.contains(":"):
+            out += f"[{u.host}]"
+        else:
+            out += encoded(&u.host, "")
+        if u.port is not None:
+            out += f":{u.port}"
+    out += encoded(&u.path, "/!$&'()*+,;=:@")
+    mut first: bool = True
+    for name, values in u.query.items():
+        for value in &values:
+            if first:
+                out += "?"
+                first = False
+            else:
+                out += "&"
+            out += encoded(&name, "")
+            out += "="
+            out += encoded(value, "")
+    if len(u.fragment) > 0:
+        out += "#"
+        out += encoded(&u.fragment, "/?!$&'()*+,;=:@")
+    return out
+
+# --- join --------------------------------------------------------------------------------
+
+# `path` without its `.` and `..` parts: "/a/b/../c" is "/a/c".
+priv manual fn without_dots(path: &str) -> str:
+    const parts: vector[str] = path.split("/")
+    mut kept: vector[str] = []
+    mut open: bool = False
+    for i in range(len(parts)):
+        open = False
+        if parts[i] == "..":
+            if len(kept) > 1 or (len(kept) == 1 and len(kept[0]) > 0):
+                kept.pop()
+            open = True
+        elif parts[i] == ".":
+            open = True
+        elif i == 0 or len(parts[i]) > 0 or i == len(parts) - 1:
+            kept.push(parts[i].copy())
+    if open:
+        kept.push("")
+    const joined: str = "/".join(&kept)
+    if path.starts_with("/") and not joined.starts_with("/"):
+        return "/" + joined
+    return joined
+
+# The URL that `link` leads to from the page at `base`, as a browser resolves it:
+# from "https://example.com/a/b", "../c" leads to "https://example.com/c", "/d" to
+# "https://example.com/d", and a whole URL to itself.
+manual fn join(base: &Url, link: &str) -> Url raises UrlError:
+    mut to: Url = check parse(link)
+    if len(to.scheme) > 0:
+        to.path = without_dots(&to.path)
+        return to
+    to.scheme = base.scheme.copy()
+    if len(to.host) > 0:
+        to.path = without_dots(&to.path)
+        return to
+    to.user = base.user.copy()
+    to.host = base.host.copy()
+    to.port = base.port
+    if len(to.path) == 0:
+        to.path = base.path.copy()
+        if len(to.query) == 0:
+            to.query = base.query.copy()
+        return to
+    if not to.path.starts_with("/"):
+        # The link starts from the folder of the base's path.
+        mut folder: size = 0
+        for i in range(byte_len(base.path)):
+            if base.path.byte(i) == 47:
+                folder = i + 1
+        if folder == 0 and len(base.host) > 0:
+            to.path = "/" + to.path
+        else:
+            to.path = between(&base.path, 0, folder) + to.path
+    to.path = without_dots(&to.path)
+    return to

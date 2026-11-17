@@ -18,6 +18,7 @@ const MODULES: &[(&str, &str)] = &[
     ("testing", include_str!("../stdlib/testing.hsy")),
     ("net", include_str!("../stdlib/net.hsy")),
     ("re", include_str!("../stdlib/re.hsy")),
+    ("url", include_str!("../stdlib/url.hsy")),
 ];
 
 /// The source of a standard module.

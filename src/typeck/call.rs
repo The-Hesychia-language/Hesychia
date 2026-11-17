@@ -116,6 +116,9 @@ impl Checker<'_> {
                 expr.kind = ExprKind::Int(value);
                 return Ok(Type::Int(IntTy::Size));
             }
+            "empty" if type_args.len() == 1 && args.is_empty() && self.global("empty").is_none() => {
+                return self.check_empty(expr);
+            }
             "range" => return Err(Diagnostic::error(span, "`range` can only be used in a `for` loop")),
             _ if !type_args.is_empty() && !self.is_generic_fn(callee) => {
                 return Err(Diagnostic::error(span, format!("`{callee}` does not take type arguments")));
@@ -414,9 +417,13 @@ impl Checker<'_> {
         if let Some(symbol) = self.type_path(receiver)? {
             return self.check_type_call(expr, symbol);
         }
+        // `i32.checked(x)`, or `T.checked(x)` where `T` is bound to a number type.
         if let ExprKind::Name(type_name) = &receiver.kind
             && self.find_local(type_name).is_none()
-            && let Some(target) = Type::scalar(type_name)
+            && let Some(target) = Type::scalar(type_name).or_else(|| {
+                let bound = self.type_params.iter().find(|(name, _)| name == type_name);
+                bound.map(|(_, ty)| ty.clone()).filter(|ty| ty.is_numeric())
+            })
         {
             return self.check_cast(expr, target);
         }

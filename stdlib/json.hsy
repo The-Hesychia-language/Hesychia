@@ -224,13 +224,6 @@ priv manual fn read_value(text: &str, at: &mut size, depth: size) -> Value raise
         return Value.Object(fields)
     return Value.Number(check read_number(text, at))
 
-# The value written in the file.
-manual fn load(f: &File) -> Value raises JsonError | IoError:
-    const text: Optional[str] = check io.read(f, end="")
-    if text is None:
-        raise error(0, "expected a value")
-    return check parse(&text)
-
 # The value written in `text`.
 manual fn parse(text: &str) -> Value raises JsonError:
     mut at: size = 0
@@ -321,12 +314,192 @@ priv manual fn dump_into(out: &mut str, value: &Value, indent: size, depth: size
                 new_line(out, indent, depth)
             out += "}"
 
-# `value` as JSON text: on one line, or with `indent` spaces per level.
-manual fn text(value: &Value, indent: size = 0) -> str:
-    mut out: str = ""
-    dump_into(&mut out, value, indent, 0)
+# --- structs ---------------------------------------------------------------------------
+# A struct is read from an object, and written as one: each field from the key of its name.
+# A field can be a text, a number, a `bool`, a struct, a `vector`, a `dict` from texts, an
+# `Optional` of them (absent or `null` is `None`), or a `Value`. Keys that name no field are
+# passed over.
+
+priv comptime fn is_int(T: type) -> bool:
+    return T == i8 or T == i16 or T == i32 or T == i64 or T == u8 or T == u16 or T == u32 or T == u64 or T == size
+
+# What a value of the wrong kind raises. Its reason starts with where it is, which each
+# level adds in front as the error goes up: ".address.zip: expected a text".
+priv manual fn refused(reason: &str) -> JsonError:
+    return JsonError(at=0, reason=f": {reason}")
+
+priv manual fn within(e: &JsonError, part: &str) -> JsonError:
+    return JsonError(at=e.at, reason=f"{part}{e.reason}")
+
+priv manual fn is_optional[T](_slot: &T) -> bool:
+    comptime if T == Optional:
+        return True
+    else:
+        return False
+
+# Sets `out` from `value`.
+priv manual fn fill[T](out: &mut T, value: &Value) raises JsonError:
+    comptime if T == Value:
+        out = value.copy()
+    elif T == str:
+        match value:
+            case Value.Text(text):
+                out = text.copy()
+            case _:
+                raise refused("expected a text")
+    elif T == bool:
+        match value:
+            case Value.Bool(flag):
+                out = flag
+            case _:
+                raise refused("expected true or false")
+    elif T == f64:
+        match value:
+            case Value.Number(number):
+                out = number
+            case _:
+                raise refused("expected a number")
+    elif T == f32:
+        match value:
+            case Value.Number(number):
+                out = f32(number)
+            case _:
+                raise refused("expected a number")
+    elif is_int(T):
+        match value:
+            case Value.Number(number):
+                if number > 9007199254740992.0 or number < -9007199254740992.0 or number != f64(i64(number)):
+                    raise refused("expected a whole number")
+                const fit: Optional[T] = T.checked(i64(number))
+                if fit is None:
+                    raise refused(f"{i64(number)} does not fit the field's type")
+                out = fit
+            case _:
+                raise refused("expected a number")
+    elif T == Optional:
+        match value:
+            case Value.Null:
+                out = None
+            case _:
+                mut one: item(T) = empty[item(T)]()
+                check fill(&mut one, value)
+                out = one
+    elif T == vector:
+        match value:
+            case Value.List(items):
+                out.clear()
+                for i in range(len(items)):
+                    mut one: item(T) = empty[item(T)]()
+                    try:
+                        check fill(&mut one, &items[i])
+                    except JsonError as e:
+                        raise within(&e, f"[{i}]")
+                    out.push(one)
+            case _:
+                raise refused("expected a list")
+    elif T == dict:
+        match value:
+            case Value.Object(entries):
+                out.clear()
+                const names: vector[str] = entries.keys()
+                for name in &names:
+                    mut one: item(T) = empty[item(T)]()
+                    try:
+                        check fill(&mut one, &entries[name])
+                    except JsonError as e:
+                        raise within(&e, f".{name}")
+                    out[name.copy()] = one
+            case _:
+                raise refused("expected an object")
+    elif is_struct(T):
+        match value:
+            case Value.Object(entries):
+                comptime for f in fields(T):
+                    if f.name in entries:
+                        try:
+                            check fill(&mut field(out, f), &entries[f.name])
+                        except JsonError as e:
+                            raise within(&e, f".{f.name}")
+                    elif not is_optional(&field(out, f)):
+                        raise JsonError(at=0, reason=f".{f.name}: missing")
+            case _:
+                raise refused("expected an object")
+    else:
+        comptime assert(False, "json reads texts, numbers, `bool`, structs, `vector`, `dict`, `Optional` and `Value`")
+
+# `text` read as a `T`: `json.to_struct[User](text)` for a struct, or
+# `json.to_struct[vector[User]](text)` for a list of them. What does not fit raises a
+# `JsonError` whose reason says where: "users[2].age: expected a number".
+manual fn to_struct[T](text: &str) -> T raises JsonError:
+    const value: Value = check parse(text)
+    mut out: T = empty[T]()
+    try:
+        check fill(&mut out, &value)
+    except JsonError as e:
+        # The reason starts with ".name" or ": ": the mark in front goes.
+        if e.reason.starts_with(": "):
+            raise JsonError(at=e.at, reason=e.reason[2:])
+        if e.reason.starts_with("."):
+            raise JsonError(at=e.at, reason=e.reason[1:])
+        raise e
     return out
 
-# Writes `value` as JSON, as `text` gives it.
-manual fn dump(value: &Value, to: &File = stdout, indent: size = 0):
-    print(text(value, indent), to=to)
+# What is written in the file: a `Value`, or with `json.load[User](f)` a `User`, read as
+# `to_struct` reads it.
+manual fn load[T = Value](f: &File) -> T raises JsonError | IoError:
+    const text: Optional[str] = check io.read(f, end="")
+    if text is None:
+        raise error(0, "expected a value")
+    comptime if T == Value:
+        return check parse(&text)
+    else:
+        return check to_struct[T](&text)
+
+# `x` as a `Value`.
+priv manual fn to_value[T](x: &T) -> Value:
+    comptime if T == Value:
+        return x.copy()
+    elif T == str:
+        return Value.Text(x.copy())
+    elif T == bool:
+        return Value.Bool(x)
+    elif T == f64 or T == f32 or is_int(T):
+        return Value.Number(f64(x))
+    elif T == Optional:
+        const held: T = x.copy()
+        if held is None:
+            return Value.Null
+        return to_value(&held)
+    elif T == vector:
+        mut items: vector[Value] = []
+        for i in range(len(x)):
+            items.push(to_value(&x[i]))
+        return Value.List(items)
+    elif T == dict:
+        mut entries: dict[str, Value] = dict()
+        const names: vector[str] = x.keys()
+        for name in &names:
+            entries[name.copy()] = to_value(&x[name])
+        return Value.Object(entries)
+    elif is_struct(T):
+        mut entries: dict[str, Value] = dict()
+        comptime for f in fields(T):
+            entries[f.name] = to_value(&field(x, f))
+        return Value.Object(entries)
+    else:
+        comptime assert(False, "json writes texts, numbers, `bool`, structs, `vector`, `dict`, `Optional` and `Value`")
+
+# `value` as JSON text: on one line, or with `indent` spaces per level. `value` is a
+# `Value`, or anything `to_struct` reads.
+manual fn to_text[T](value: &T, indent: size = 0) -> str:
+    mut out: str = ""
+    comptime if T == Value:
+        dump_into(&mut out, value, indent, 0)
+    else:
+        const made: Value = to_value(value)
+        dump_into(&mut out, &made, indent, 0)
+    return out
+
+# Writes `value` as JSON, as `to_text` gives it.
+manual fn dump[T](value: &T, to: &File = stdout, indent: size = 0):
+    print(to_text(value, indent), to=to)

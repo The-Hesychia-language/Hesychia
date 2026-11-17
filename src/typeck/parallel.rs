@@ -423,6 +423,7 @@ fn stmt_names(stmt: &Stmt, out: &mut BTreeSet<String>) {
             cif.branches.iter().for_each(|(_, b)| stmts_names(b, out));
             stmts_names(cif.otherwise.as_deref().unwrap_or_default(), out);
         }
+        StmtKind::ComptimeFor { body, .. } => stmts_names(body, out),
         StmtKind::Select { cases, otherwise } => {
             for case in cases {
                 names(&case.wait, out);

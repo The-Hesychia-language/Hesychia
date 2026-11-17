@@ -115,7 +115,7 @@ impl Tables {
         // A built-in one may already know: `item(vector[T])` is `T`.
         if waiting
             && let Callee::Builtin(name) = &callee
-            && let Ok(Value::Type(ty)) = builtin_call(name, args.clone(), span)
+            && let Ok(Value::Type(ty)) = builtin_call(self, name, args.clone(), span)
         {
             return Ok(ty);
         }
@@ -130,7 +130,7 @@ impl Tables {
         }
         let value = match callee {
             Callee::Fn(func) => self.comptime_call(target, func, args, span)?,
-            Callee::Builtin(name) => builtin_call(&name, args, span)?,
+            Callee::Builtin(name) => builtin_call(self, &name, args, span)?,
         };
         match value {
             Value::Type(ty) => Ok(ty),
@@ -462,7 +462,7 @@ impl Env for Frame<'_> {
             return self.tables.run(self.target, func, args, outer, span);
         }
         let span = if callee == "panic" { self.origin } else { span };
-        builtin_call(callee, args, span)
+        builtin_call(self.tables, callee, args, span)
     }
 
     fn is_family(&self, ty: &Type, family: &str) -> bool {
@@ -471,13 +471,22 @@ impl Env for Frame<'_> {
 }
 
 /// The `comptime fn`s every module has: `item(T)`, the type of what `T` holds, and `panic`.
-pub(super) fn builtin_call(callee: &str, args: Vec<Value>, span: Span) -> Result<Value> {
+pub(super) fn builtin_call(tables: &Tables, callee: &str, args: Vec<Value>, span: Span) -> Result<Value> {
+    // A `dict[K, V]` or a `set[T]` holds what its last type argument names.
+    let held = |ty: &Type| match ty {
+        Type::Struct(named) => tables
+            .templates
+            .origin(super::templates::Kind::Struct, named.id)
+            .and_then(|(_, args)| args.last().cloned()),
+        ty => item(ty).cloned(),
+    };
     match (callee, args.as_slice()) {
-        ("item", [Value::Type(ty)]) => item(ty)
-            .cloned()
+        ("item", [Value::Type(ty)]) => held(ty)
             .map(Value::Type)
             .ok_or_else(|| Diagnostic::error(span, format!("`{ty}` holds no items"))),
         ("item", _) => Err(Diagnostic::error(span, "`item` takes one type")),
+        ("is_struct", [Value::Type(ty)]) => Ok(Value::Bool(matches!(ty, Type::Struct(_)))),
+        ("is_enum", [Value::Type(ty)]) => Ok(Value::Bool(matches!(ty, Type::Enum { .. }))),
         // A `comptime fn` that panics stops the compilation with its message.
         ("panic", [Value::Str(message)]) => Err(Diagnostic::error(span, message.clone())),
         _ => Err(Diagnostic::error(span, format!("`{callee}` cannot be called at compile time"))),
@@ -518,7 +527,7 @@ impl Env for ModuleEnv<'_> {
     fn call(&self, callee: &str, args: Vec<Value>, span: Span) -> Result<Value> {
         match self.tables.comptime_fn(self.module, callee) {
             Some(func) => self.tables.comptime_call(self.target, func, args, span),
-            None => builtin_call(callee, args, span),
+            None => builtin_call(self.tables, callee, args, span),
         }
     }
 
@@ -560,6 +569,7 @@ fn depends_on_params(body: &[Stmt], params: &[(String, Vec<usize>)]) -> bool {
             branches.iter().any(|(_, body)| depends_on_params(body, params))
                 || otherwise.as_deref().is_some_and(|body| depends_on_params(body, params))
         }
+        StmtKind::ComptimeFor { source, body, .. } => named(source) || depends_on_params(body, params),
         StmtKind::While { body, .. } | StmtKind::For { body, .. } | StmtKind::Block(body) => {
             depends_on_params(body, params)
         }

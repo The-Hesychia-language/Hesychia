@@ -45,6 +45,9 @@ impl Checker<'_> {
         if matches!(stmt.kind, StmtKind::ComptimeIf(_)) {
             return self.expand_comptime_if(stmt);
         }
+        if matches!(stmt.kind, StmtKind::ComptimeFor { .. }) {
+            return self.expand_comptime_for(stmt);
+        }
         let span = stmt.span;
         if let StmtKind::Assign { target, op: None, value } = &stmt.kind
             && let Some(call) = self.index_set(target, value)?
@@ -99,7 +102,7 @@ impl Checker<'_> {
                 self.check_parallel_for(var, iter, body, worker, c_name, span)
             }
             StmtKind::Select { cases, otherwise } => self.check_select(cases, otherwise.as_deref_mut()),
-            StmtKind::ComptimeIf(_) => unreachable!("expanded above"),
+            StmtKind::ComptimeIf(_) | StmtKind::ComptimeFor { .. } => unreachable!("expanded above"),
         }
     }
 

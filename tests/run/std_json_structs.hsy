@@ -1,0 +1,85 @@
+from io import print
+import io
+import fs
+import json
+from json import Value
+
+managed struct Address:
+    city: str
+    zip: str
+
+managed struct User:
+    name: str
+    age: i64
+    tags: vector[str]
+    address: Address
+    email: Optional[str]
+
+manual struct Stats:
+    count: u8
+    ratio: f32
+    scores: dict[str, vector[i32]]
+    best: Optional[Address]
+    raw: Value
+    ok: bool
+
+managed fn refused(text: str):
+    try:
+        json.to_struct[vector[User]](text)
+    except JsonError as e:
+        print(e.reason)
+
+managed fn main():
+    user = json.to_struct[User]("{\"name\": \"Ann\", \"age\": 31, \"tags\": [\"a\", \"b\"], \"address\": {\"city\": \"Lyon\", \"zip\": \"69001\"}, \"extra\": [1]}")
+    print(f"{user.name} lives in {user.address.city}, {user.email} {user.tags}")
+    user.age += 1
+    user.email = "ann@example.com"
+    print(json.to_text(user))
+    again = json.to_struct[User](json.to_text(user, indent=2))
+    print(f"{again.age} {again.email}")
+
+    stats = json.to_struct[Stats]("{\"count\": 200, \"ratio\": 0.5, \"scores\": {\"x\": [1, 2], \"y\": []}, \"best\": {\"city\": \"Oslo\", \"zip\": \"0150\"}, \"raw\": [null, {\"k\": true}], \"ok\": true}")
+    print(f"{stats.count} {stats.ratio} {stats.scores} {stats.ok}")
+    print(json.to_text(stats))
+    numbers = json.to_struct[vector[f64]]("[1, 2.5]")
+    by_name = json.to_struct[dict[str, Optional[i64]]]("{\"a\": 1, \"b\": null}")
+    print(f"{numbers} {by_name} {json.to_text(by_name)} {json.to_text(numbers)}")
+
+    f = fs.open("hsy-json-structs.json", fs.Mode.Write)
+    json.dump([user, again], to=f, indent=1)
+    io.close(f)
+    g = fs.open("hsy-json-structs.json")
+    users = json.load[vector[User]](g)
+    io.close(g)
+    h = fs.open("hsy-json-structs.json")
+    value = json.load(h)
+    io.close(h)
+    fs.remove("hsy-json-structs.json")
+    print(f"{len(users)} {users[1].address.zip} {len(json.to_text(value))}")
+
+    refused("[{\"name\": \"Bob\", \"age\": \"old\"}]")
+    refused("[{\"name\": \"Bob\", \"age\": 3, \"tags\": [], \"address\": {\"city\": 4}}]")
+    refused("[{\"name\": \"Bob\", \"age\": 3, \"tags\": [\"a\", 2]}]")
+    refused("[{\"name\": \"Bob\", \"age\": 3.5}]")
+    refused("[{\"age\": 3}]")
+    refused("{}")
+    refused("[1")
+    try:
+        json.to_struct[Stats]("{\"count\": 300}")
+    except JsonError as e:
+        print(e.reason)
+# expect: Ann lives in Lyon, None ['a', 'b']
+# expect: {"name":"Ann","age":32,"tags":["a","b"],"address":{"city":"Lyon","zip":"69001"},"email":"ann@example.com"}
+# expect: 32 'ann@example.com'
+# expect: 200 0.5 {'x': [1, 2], 'y': []} True
+# expect: {"count":200,"ratio":0.5,"scores":{"x":[1,2],"y":[]},"best":{"city":"Oslo","zip":"0150"},"raw":[null,{"k":true}],"ok":true}
+# expect: [1.0, 2.5] {'a': 1, 'b': None} {"a":1,"b":null} [1,2.5]
+# expect: 2 69001 215
+# expect: [0].age: expected a number
+# expect: [0].address.city: expected a text
+# expect: [0].tags[1]: expected a text
+# expect: [0].age: expected a whole number
+# expect: [0].name: missing
+# expect: expected a list
+# expect: expected `,` or `]`
+# expect: count: 300 does not fit the field's type

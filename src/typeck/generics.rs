@@ -37,6 +37,14 @@ pub(super) struct Generics {
 }
 
 impl Checker<'_> {
+    /// The type `[T = Value]` gives a parameter of the generic function `index`, if it has one.
+    fn generic_default(&mut self, index: usize, position: usize) -> Result<Option<Type>> {
+        let Some((module, decl)) = self.generics.decls.get(&index) else { return Ok(None) };
+        let Some(default) = decl.generics.get(position).and_then(|g| g.default.clone()) else { return Ok(None) };
+        let module = *module;
+        self.tables.resolve_mut(module, &default, &[]).map(Some)
+    }
+
     /// A call to a generic function becomes a call to its specialization.
     pub(super) fn check_generic_call(&mut self, expr: &mut Expr, index: usize) -> Result<Type> {
         let span = expr.span;
@@ -76,11 +84,14 @@ impl Checker<'_> {
             }
         }
         let mut bindings = Vec::new();
-        for ((name, bounds), ty) in generics.iter().zip(bound) {
-            let ty = ty.ok_or_else(|| {
-                Diagnostic::error(span, format!("cannot infer `{name}` in this call to `{callee}`"))
-                    .with_hint(format!("write it: `{callee}[i32](...)`"))
-            })?;
+        for (position, ((name, bounds), ty)) in generics.iter().zip(bound).enumerate() {
+            let ty = match ty {
+                Some(ty) => ty,
+                None => self.generic_default(index, position)?.ok_or_else(|| {
+                    Diagnostic::error(span, format!("cannot infer `{name}` in this call to `{callee}`"))
+                        .with_hint(format!("write it: `{callee}[i32](...)`"))
+                })?,
+            };
             for &trait_id in bounds {
                 if !self.satisfies(&ty, trait_id) {
                     let trait_name = &self.tables.traits[trait_id].name;

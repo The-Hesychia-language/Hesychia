@@ -264,6 +264,10 @@ impl Parser {
         self.advance();
         let kind = match self.peek() {
             Tok::Kw(Kw::If) => StmtKind::ComptimeIf(self.parse_comptime_if(Self::parse_block)?),
+            Tok::Kw(Kw::For) => {
+                let StmtKind::For { var, iter, body } = self.parse_for()? else { unreachable!("a for loop") };
+                StmtKind::ComptimeFor { var, source: iter, body }
+            }
             Tok::Ident(name) if name == "assert" => {
                 StmtKind::ComptimeAssert(self.parse_comptime_assert(span)?)
             }

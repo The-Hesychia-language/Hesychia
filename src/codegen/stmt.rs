@@ -101,7 +101,9 @@ impl Emitter<'_> {
                 self.line("continue;");
             }
             StmtKind::Pass | StmtKind::Comptime(_) | StmtKind::ComptimeAssert(_) => {}
-            StmtKind::ComptimeIf(_) => unreachable!("expanded by the type checker"),
+            StmtKind::ComptimeIf(_) | StmtKind::ComptimeFor { .. } => {
+                unreachable!("expanded by the type checker")
+            }
         }
     }
 
