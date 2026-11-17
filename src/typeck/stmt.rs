@@ -427,7 +427,7 @@ impl Checker<'_> {
         result
     }
 
-    fn check_condition(&mut self, cond: &mut Expr) -> Result<()> {
+    pub(super) fn check_condition(&mut self, cond: &mut Expr) -> Result<()> {
         let found = self.check_expr(cond, Some(&Type::Bool))?;
         expect_type(&found, &Type::Bool, cond.span)
     }

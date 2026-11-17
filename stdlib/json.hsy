@@ -231,7 +231,8 @@ manual fn load(f: &File) -> Value raises JsonError | IoError:
         raise error(0, "expected a value")
     return check parse(&text)
 
-priv manual fn parse(text: &str) -> Value raises JsonError:
+# The value written in `text`.
+manual fn parse(text: &str) -> Value raises JsonError:
     mut at: size = 0
     const value: Value = check read_value(text, &mut at, 0)
     skip_space(text, &mut at)
@@ -320,8 +321,12 @@ priv manual fn dump_into(out: &mut str, value: &Value, indent: size, depth: size
                 new_line(out, indent, depth)
             out += "}"
 
-# Writes `value` as JSON: on one line, or with `indent` spaces per level.
-manual fn dump(value: &Value, to: &File = stdout, indent: size = 0):
+# `value` as JSON text: on one line, or with `indent` spaces per level.
+manual fn text(value: &Value, indent: size = 0) -> str:
     mut out: str = ""
     dump_into(&mut out, value, indent, 0)
-    print(out, to=to)
+    return out
+
+# Writes `value` as JSON, as `text` gives it.
+manual fn dump(value: &Value, to: &File = stdout, indent: size = 0):
+    print(text(value, indent), to=to)

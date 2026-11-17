@@ -1,0 +1,5 @@
+manual fn main():
+    const p: (i32, i32) = (1, 2)
+    const i: size = 1
+    const _x: i32 = p[i]
+# error: a tuple is indexed by a number written here: `pair[0]`

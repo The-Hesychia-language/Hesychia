@@ -187,7 +187,7 @@ fn compile_to_c(input: &Input, options: &BuildOptions, platform: &Platform) -> R
         }
     }
     let file_names = (0..sources.len()).map(|file| sources.path(file).to_string()).collect();
-    Ok(codegen::generate(&program, &checked, &codegen::Options { debug, file_names }))
+    Ok(codegen::generate(&program, &checked, &codegen::Options { debug, file_names, test: options.test.clone() }))
 }
 
 struct CFlags {

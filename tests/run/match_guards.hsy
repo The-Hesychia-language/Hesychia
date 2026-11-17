@@ -1,0 +1,85 @@
+from io import print
+
+manual enum Shape:
+    Circle(radius: f64)
+    Named(name: str, sides: i32)
+    Empty
+
+manual struct TooLong:
+    size: size
+
+manual fn short(name: &str) -> bool raises TooLong:
+    if len(name) > 8:
+        raise TooLong(size=len(name))
+    return len(name) < 4
+
+manual fn describe(owned shape: Shape) -> str:
+    match shape:
+        case Shape.Circle(r) if r > 10.0:
+            return "big circle"
+        case Shape.Circle(r):
+            return f"circle {r}"
+        case Shape.Named(name, sides) if sides == 3 and name == "tri":
+            return name + "angle"
+        case Shape.Named(name, _) if len(name) > 5:
+            return f"long {name}"
+        case Shape.Named(name, sides):
+            return f"{name} with {sides} sides"
+        case Shape.Empty:
+            return "nothing"
+
+manual fn label(shape: &Shape) -> str raises TooLong:
+    match shape:
+        case Shape.Named(name, _) if check short(name):
+            return f"short {name}"
+        case Shape.Named(name, _):
+            return name.copy()
+        case _:
+            return "?"
+
+managed fn sign(n: i64) -> str:
+    result = "?"
+    match n:
+        case 0:
+            result = "zero"
+        case x if x < 0:
+            result = "negative"
+        case x if x % 2 == 0:
+            result = f"even {x}"
+        case _:
+            result = "odd"
+    return result
+
+managed fn main():
+    print(describe(Shape.Circle(20.0)))
+    print(describe(Shape.Circle(1.5)))
+    print(describe(Shape.Named("tri", 3)))
+    print(describe(Shape.Named("hexagon", 6)))
+    print(describe(Shape.Named("box", 4)))
+    print(describe(Shape.Empty))
+    print(f"{sign(0)} {sign(-4)} {sign(8)} {sign(7)}")
+    for i in range(6):
+        match i:
+            case k if k > 3:
+                break
+            case k if k == 1:
+                continue
+            case _:
+                print(f"turn {i}")
+    print(f"{label(Shape.Named("ab", 1))} {label(Shape.Named("abcdef", 1))} {label(Shape.Empty)}")
+    try:
+        label(Shape.Named("a very long name", 1))
+    except TooLong as e:
+        print(f"too long: {e.size}")
+# expect: big circle
+# expect: circle 1.5
+# expect: triangle
+# expect: long hexagon
+# expect: box with 4 sides
+# expect: nothing
+# expect: zero negative even 8 odd
+# expect: turn 0
+# expect: turn 2
+# expect: turn 3
+# expect: short ab abcdef ?
+# expect: too long: 16

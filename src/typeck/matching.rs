@@ -138,13 +138,34 @@ impl Checker<'_> {
             self.consume(subject)?;
         }
         self.check_exhaustive(cases, &ty, span)?;
-        let start = self.moved.clone();
+        let mut start = self.moved.clone();
         let mut merged = start.clone();
         for (case, names) in cases.iter_mut().zip(bindings) {
             self.moved.clone_from(&start);
+            if let Some(guard) = &mut case.guard {
+                // The guard runs before the case is taken: it reads what the pattern binds,
+                // through `&` references, and the body then owns it.
+                self.push_scope();
+                for (name, ty, span) in &names {
+                    let lent = match ty {
+                        ty if ty.is_copy() || matches!(ty, Type::Ref(..)) => ty.clone(),
+                        ty => Type::Ref(Box::new(ty.clone()), false),
+                    };
+                    let var = self.new_var(lent, false, *span);
+                    var.used.set(true);
+                    self.declare(name, var)?;
+                }
+                let checked = self.check_condition(guard);
+                self.pop_scope();
+                checked?;
+                start.clone_from(&self.moved);
+                merged.extend(start.clone());
+            }
             self.push_scope();
             for (name, ty, span) in names {
                 let var = self.new_var(ty, false, span);
+                // A name the guard reads is not unused.
+                var.used.set(case.guard.is_some());
                 self.declare(&name, var)?;
             }
             self.check_block(&mut case.body)?;
@@ -285,8 +306,10 @@ impl Checker<'_> {
 
     /// Every value of the subject must be matched; cases after a catch-all are reported.
     fn check_exhaustive(&mut self, cases: &[Case], ty: &Type, span: Span) -> Result<()> {
-        if let Some(position) =
-            cases.iter().position(|c| matches!(c.pattern, Pattern::Wildcard(_) | Pattern::Bind(..)))
+        // A case with a guard may not be taken: only the others count.
+        if let Some(position) = cases
+            .iter()
+            .position(|c| c.guard.is_none() && matches!(c.pattern, Pattern::Wildcard(_) | Pattern::Bind(..)))
         {
             for case in &cases[position + 1..] {
                 self.warnings.push(
@@ -297,7 +320,7 @@ impl Checker<'_> {
             return Ok(());
         }
         let mut covered = HashSet::new();
-        for case in cases {
+        for case in cases.iter().filter(|c| c.guard.is_none()) {
             collect_covered(&case.pattern, &mut covered);
         }
         let missing: Vec<String> = match ty {

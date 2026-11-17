@@ -34,6 +34,12 @@ managed fn main():
         except JsonError as e:
             print(f"{e.at}: {e.reason}")
     fs.remove("hsy-json-test.json")
+    parsed = json.parse("[1, {\"a\": null}]")
+    print(f"{json.text(parsed)} {json.text(json.parse("[]"), indent=2)}")
+    try:
+        json.parse("[1,")
+    except JsonError as e:
+        print(f"{e.at}: {e.reason}")
 # expect: {"name":"Ana","tags":[1,2.5,true,null],"esc":"a\"bé😀\n","empty":{}}
 # expect: {
 # expect:   "name": "Ana",
@@ -55,3 +61,5 @@ managed fn main():
 # expect: 2: text after the value
 # expect: 1: text after the value
 # expect: 0: expected a value
+# expect: [1,{"a":null}] []
+# expect: 3: expected a value

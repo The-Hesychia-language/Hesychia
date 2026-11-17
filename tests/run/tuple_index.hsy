@@ -1,0 +1,43 @@
+from io import print
+
+manual struct Tag(Drop):
+    name: str
+
+    method drop(&mut self):
+        print(f"drop {self.name}")
+
+manual fn pair(n: i64) -> (i64, str):
+    return (n, f"n{n}")
+
+manual fn tagged() -> (Tag, i64):
+    return (Tag(name="t"), 5)
+
+manual fn swap(p: &(i64, str)) -> (str, i64):
+    return (p[1].copy(), p[0])
+
+manual fn lengths() -> size:
+    mut p: (i64, str) = pair(3)
+    p[0] += 4
+    p[1] += "!"
+    print(f"{p[0]} {p[1]} {len(p[1])}")
+    const s: (str, i64) = swap(&p)
+    print(f"{s[0]} {s[1]}")
+    const nested: ((i64, i64), bool) = ((1, 2), True)
+    print(f"{nested[0][1]} {nested[1]}")
+    return len(pair(12)[1])
+
+managed fn main():
+    print(f"{lengths()}")
+    p = pair(8)
+    text = p[1]
+    p[0] = p[0] * 2
+    print(f"{text} {p[0]} {pair(9)[0]} {tagged()[1]}")
+    pairs = [(1, "a"), (2, "b")]
+    print(f"{[q[1] for q in pairs]} {pairs[1][0]}")
+# expect: 7 n3! 3
+# expect: n3! 7
+# expect: 2 True
+# expect: 3
+# expect: drop t
+# expect: n8 16 9 5
+# expect: ['a', 'b'] 2

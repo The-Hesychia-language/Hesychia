@@ -197,6 +197,7 @@ __attribute__((noreturn)) HSY_UNUSED static void hsy_panic_text(const hsy_str* s
     fputs("panic: ", stderr);
     fwrite(s->data ? s->data : "", 1, s->len, stderr);
     fputc('\n', stderr);
+    hsy_test_where();
     __builtin_trap();
 }
 

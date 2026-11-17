@@ -409,6 +409,8 @@ pub enum Catch {
 #[derive(Clone)]
 pub struct Case {
     pub pattern: Pattern,
+    /// `case pattern if guard:`: the case is taken only when the guard holds.
+    pub guard: Option<Expr>,
     pub body: Vec<Stmt>,
     pub span: Span,
 }

@@ -1,0 +1,4 @@
+manual fn main():
+    const p: (i32, bool) = (1, True)
+    const _x: bool = p[2]
+# error: index 2 is out of bounds for `(i32, bool)`

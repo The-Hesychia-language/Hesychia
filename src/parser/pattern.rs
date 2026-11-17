@@ -18,11 +18,9 @@ impl Parser {
             let span = self.span();
             self.expect_kw(Kw::Case)?;
             let pattern = self.parse_pattern()?;
-            if self.at(&Tok::Kw(Kw::If)) {
-                return Err(Diagnostic::error(self.span(), "`case ... if` guards are not supported yet"));
-            }
+            let guard = if self.eat(&Tok::Kw(Kw::If)) { Some(self.parse_expr()?) } else { None };
             let body = self.parse_block()?;
-            cases.push(Case { pattern, body, span });
+            cases.push(Case { pattern, guard, body, span });
         }
         Ok(StmtKind::Match { subject, cases, borrowed: false })
     }

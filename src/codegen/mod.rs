@@ -28,6 +28,8 @@ pub struct Options {
     pub debug: bool,
     /// Source paths, indexed by file id.
     pub file_names: Vec<String>,
+    /// The `@test` function the program runs: a failure says which of its lines it was on.
+    pub test: Option<String>,
 }
 
 pub fn generate(program: &Program, checked: &Checked, options: &Options) -> String {
@@ -42,6 +44,7 @@ pub fn generate(program: &Program, checked: &Checked, options: &Options) -> Stri
         fn_raises: Vec::new(),
         tries: Vec::new(),
         borrowed_match: Vec::new(),
+        in_test: false,
         lambdas: String::new(),
         signatures: &checked.signatures,
         options,
@@ -56,6 +59,8 @@ struct Emitter<'a> {
     temps: usize,
     helpers: Helpers,
     types: TypeRegistry<'a>,
+    /// The function being emitted is the test the program runs.
+    in_test: bool,
     /// Variables to release at the end of each open block, innermost last.
     scopes: Vec<owned::Scope>,
     /// For each `match` being emitted, innermost last: whether it only borrows its subject.
@@ -92,6 +97,13 @@ const PRELUDE: &str = "\
 #define HSY_UNUSED __attribute__((unused))
 
 __attribute__((noreturn)) HSY_UNUSED static void hsy_panic(void);
+
+/* Where a test is, for `hsy test`: the line of its statement that is running. */
+HSY_UNUSED static int hsy_test_line;
+HSY_UNUSED static const char* hsy_test_file = \"\";
+HSY_UNUSED static void hsy_test_where(void) {
+    if (hsy_test_line) fprintf(stderr, \"at %s:%d\\n\", hsy_test_file, hsy_test_line);
+}
 
 /* The program's arguments, for `os.args()`. */
 static int hsy_argc;
@@ -320,6 +332,11 @@ impl Emitter<'_> {
     fn emit_fn(&mut self, c_name: &str, f: &FnDecl) {
         let header = self.fn_header(c_name, f);
         self.line(&format!("{header} {{"));
+        self.in_test = self.options.test.as_deref().is_some_and(|test| c_name == fn_c_name(0, test));
+        if self.in_test {
+            let file = expr::c_string(&self.options.file_names[f.span.file]);
+            self.line(&format!("    hsy_test_file = {file};"));
+        }
         let sig = &self.signatures[c_name];
         let params = &sig.params;
         self.fn_ret = sig.ret.clone();
@@ -436,7 +453,7 @@ impl Emitter<'_> {
                 )
             }
             // What was written before the fault is kept; a message says why the program stops.
-            None => "fflush(stdout);\n    fputs(\"panic: the program stopped on a fault, such as an index out of range\\n\", stderr);\n    "
+            None => "fflush(stdout);\n    fputs(\"panic: the program stopped on a fault, such as an index out of range\\n\", stderr);\n    hsy_test_where();\n    "
                 .to_string(),
         };
         format!("\nstatic void hsy_panic(void) {{\n    {call}__builtin_trap();\n}}\n")
@@ -468,7 +485,7 @@ impl Emitter<'_> {
         format!(
             "int main(int argc, char** argv) {{\n    {ARGS}static const char* errors[] = {{ {names}}};\n    {result} r = {main}();\n    \
              if (r.err) {{\n        fprintf(stderr, \"error: `%s` was raised and not caught\\n\", errors[r.err - 1]);\n        \
-             return 1;\n    }}\n    {exit}return {value};\n}}\n"
+             hsy_test_where();\n        return 1;\n    }}\n    {exit}return {value};\n}}\n"
         )
     }
 }

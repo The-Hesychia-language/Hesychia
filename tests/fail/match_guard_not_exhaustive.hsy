@@ -1,0 +1,10 @@
+manual fn sign(n: i32) -> i32:
+    match n:
+        case x if x > 0:
+            return 1
+        case x if x <= 0:
+            return -1
+
+manual fn main():
+    sign(1)
+# error: this `match` does not cover every other value

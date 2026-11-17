@@ -36,6 +36,22 @@ pub(super) fn c_string(text: &str) -> String {
 }
 
 impl Emitter<'_> {
+    /// `base.name`. The field of a temporary value, as in `make().age`, is taken out of it
+    /// (copied, when it owns memory) and the temporary is released.
+    fn emit_field(&mut self, expr: &Expr, base: &Expr, name: &str) -> String {
+        let base_code = self.emit_expr(base);
+        let drop = if super::stmt::is_place(base) { None } else { self.types.drop_fn(base.ty()) };
+        let Some(drop) = drop else { return format!("{base_code}.{}", c_ident(name)) };
+        let (whole, part) = (self.types.c_type(base.ty()), self.types.c_type(expr.ty()));
+        let (temp, field) = (self.temp("whole"), self.temp("part"));
+        let taken = if self.types.table.needs_drop(expr.ty()) {
+            format!("{}(&{temp}.{})", self.types.copy_fn(expr.ty()), c_ident(name))
+        } else {
+            format!("{temp}.{}", c_ident(name))
+        };
+        format!("({{ {whole} {temp} = {base_code}; {part} {field} = {taken}; {drop}(&{temp}); {field}; }})")
+    }
+
     pub(super) fn emit_expr(&mut self, expr: &Expr) -> String {
         match &expr.kind {
             ExprKind::Formatted { .. } => unreachable!("made a call by the checker"),
@@ -78,7 +94,7 @@ impl Emitter<'_> {
             ExprKind::Method { .. } => unreachable!("methods become calls in the type checker"),
             ExprKind::Convert(value) => self.emit_conversion(value, expr.ty()),
             ExprKind::Cast(value, kind) => self.emit_cast(value, *kind, expr.ty()),
-            ExprKind::Field { base, name } => format!("{}.{}", self.emit_expr(base), c_ident(name)),
+            ExprKind::Field { base, name } => self.emit_field(expr, base, name),
             ExprKind::Index { base, index } if matches!(base.ty(), Type::Vector(_)) => {
                 self.emit_vector_index(base, index)
             }

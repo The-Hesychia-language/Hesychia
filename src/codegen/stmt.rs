@@ -28,6 +28,9 @@ impl Emitter<'_> {
             let file = c_string(&self.options.file_names[stmt.span.file]);
             self.out += &format!("#line {} {file}\n", stmt.span.line);
         }
+        if self.in_test {
+            self.line(&format!("hsy_test_line = {};", stmt.span.line));
+        }
         if let Some(hoisted) = self.hoist(stmt) {
             return self.emit_stmt_kind(&hoisted);
         }
@@ -286,6 +289,14 @@ impl Emitter<'_> {
             self.own(name.clone(), subject.ty().clone());
             name
         };
+        if cases.iter().any(|c| c.guard.is_some()) {
+            self.emit_guarded_cases(cases, subject.ty(), &value);
+            self.close_scope(false);
+            self.indent -= 1;
+            self.line("}");
+            self.borrowed_match.pop();
+            return;
+        }
         for (i, case) in cases.iter().enumerate() {
             // The match is exhaustive, so the last case needs no test.
             let catch_all =
@@ -316,6 +327,60 @@ impl Emitter<'_> {
         self.indent -= 1;
         self.line("}");
         self.borrowed_match.pop();
+    }
+
+    /// Cases of a `match` that has guards. A case whose guard fails leaves the others to be
+    /// tried, so each case is an `if` of its own that ends by leaving the match. The guard
+    /// reads what the pattern binds by address; the body takes it once the guard holds.
+    fn emit_guarded_cases(&mut self, cases: &[Case], ty: &Type, value: &str) {
+        let end = self.temp("matched");
+        let mut leaves = false;
+        // The cases without guard cover every value: the last of them needs no test.
+        let last = cases.iter().rposition(|c| c.guard.is_none()).unwrap_or(cases.len());
+        for (i, case) in cases.iter().enumerate().take(last + 1) {
+            let test = if i == last { "1".to_string() } else { self.pattern_test(&case.pattern, ty, value) };
+            self.line(&format!("if ({test}) {{"));
+            self.indent += 1;
+            if let Some(guard) = &case.guard {
+                let held = self.temp("guard");
+                self.line(&format!("bool {held};"));
+                self.line("{");
+                self.indent += 1;
+                self.open_scope(false);
+                self.borrowed_match.push(true);
+                self.emit_bindings(&case.pattern, ty, value);
+                self.borrowed_match.pop();
+                let mut guard = guard.clone();
+                self.hoist_expr(&mut guard);
+                let code = self.emit_condition(&guard);
+                self.line(&format!("{held} = {code};"));
+                self.close_scope(false);
+                self.indent -= 1;
+                self.line("}");
+                self.line(&format!("if ({held}) {{"));
+                self.indent += 1;
+            }
+            self.open_scope(false);
+            self.emit_bindings(&case.pattern, ty, value);
+            self.indent -= 1;
+            self.emit_body(&case.body);
+            self.indent += 1;
+            let jumped = ends_with_jump(&case.body);
+            self.close_scope(jumped);
+            if !jumped && i != last {
+                self.line(&format!("goto {end};"));
+                leaves = true;
+            }
+            if case.guard.is_some() {
+                self.indent -= 1;
+                self.line("}");
+            }
+            self.indent -= 1;
+            self.line("}");
+        }
+        if leaves {
+            self.line(&format!("{end}: ;"));
+        }
     }
 
     pub(super) fn pattern_test(&mut self, pattern: &Pattern, ty: &Type, value: &str) -> String {

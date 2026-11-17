@@ -824,6 +824,22 @@ impl Checker<'_> {
             }
             return Ok(item);
         }
+        if let Type::Tuple(items) = &ty {
+            // `pair[0]`: the position is known when compiling, and so is the item's type.
+            let ExprKind::Int(position) = index.kind else {
+                return Err(Diagnostic::error(index.span, "a tuple is indexed by a number written here: `pair[0]`"));
+            };
+            let Some(item) = usize::try_from(position).ok().and_then(|i| items.get(i)) else {
+                return Err(Diagnostic::error(
+                    index.span,
+                    format!("index {position} is out of bounds for `{ty}`"),
+                ));
+            };
+            let item = item.clone();
+            let base = std::mem::replace(base.as_mut(), Expr::new(ExprKind::None, span));
+            expr.kind = ExprKind::Field { base: Box::new(base), name: format!("f{position}") };
+            return Ok(item);
+        }
         let (Type::Array(item, len) | Type::Simd(item, len)) = &ty else {
             return Err(Diagnostic::error(span, format!("`{ty}` cannot be indexed")));
         };

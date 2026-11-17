@@ -98,6 +98,9 @@ fn calls_in_stmts(stmts: &[Stmt], out: &mut Vec<String>) {
             StmtKind::Match { subject, cases, .. } => {
                 calls_in(subject, out);
                 for case in cases {
+                    if let Some(guard) = &case.guard {
+                        calls_in(guard, out);
+                    }
                     calls_in_stmts(&case.body, out);
                 }
             }
