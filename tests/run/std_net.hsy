@@ -40,6 +40,21 @@ managed fn main():
     reply, _ = net.receive(a)
     print(reply)
 
+    quiet = net.udp("127.0.0.1", 47213, timeout=0.2)
+    try:
+        net.receive(quiet)
+    except IoError as e:
+        print(f"receive: {e.reason}")
+    waiting = net.listen("127.0.0.1", 47214, timeout=0.2)
+    try:
+        net.accept(waiting)
+    except IoError as e:
+        print(f"accept: {e.reason}")
+    silent = net.connect("127.0.0.1", 47214, timeout=0.2)
+    try:
+        io.read(silent)
+    except IoError as e:
+        print(f"read: {e.reason}")
     try:
         net.connect("127.0.0.1", 70000)
     except IoError as e:
@@ -52,5 +67,8 @@ managed fn main():
 # expect: echo été 2026
 # expect: ping from 127.0.0.1:47211
 # expect: pong
+# expect: receive: timed out
+# expect: accept: timed out
+# expect: read: timed out
 # expect: 127.0.0.1:70000: the port 70000 is not between 0 and 65535
 # expect: refused 127.0.0.1:47219

@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 
+use crate::ast::ExprKind;
 use crate::ast::{
     Builtin, ComptimeAssert, ComptimeConst, ComptimeIf, EnumDecl, Expr, ExtendDecl, FnDecl, Import,
     ImportKind, Item, Level, Module, Param, Program, Receiver, StructDecl, TypeExpr, fn_c_name,
@@ -406,6 +407,11 @@ impl Collector<'_> {
         let mut kept = Vec::new();
         for item in items {
             match item {
+                Item::Comptime(c) if matches!(c.value.kind, ExprKind::ArrayLit(_)) => {
+                    let item = Item::Global(self.table(c)?);
+                    self.register(&item)?;
+                    kept.push(item);
+                }
                 Item::Comptime(c) => self.add_const(&c)?,
                 Item::ComptimeFn(decl) => {
                     let (name, private, span) = (decl.name.clone(), decl.private, decl.span);
@@ -555,6 +561,28 @@ impl Collector<'_> {
         };
         self.tables.fns.push(sig);
         self.tables.fns.len() - 1
+    }
+
+    /// `comptime PRIMES: array[i32, 4] = [2, 3, 5, 7]`: a table, kept as a module constant
+    /// that code reads where it is. Its items are values known when compiling.
+    fn table(&self, c: ComptimeConst) -> Result<crate::ast::GlobalDecl> {
+        let is_array = |ty: &TypeExpr| matches!(ty, TypeExpr::Named { name, .. } if name == "array");
+        let Some(ty) = c.ty.filter(is_array) else {
+            return Err(Diagnostic::error(c.span, format!("the table `{}` needs its type", c.name))
+                .with_hint(format!("write `comptime {}: array[i32, 3] = [...]`", c.name)));
+        };
+        self.table_items(&c.value)?;
+        Ok(crate::ast::GlobalDecl { private: c.private, name: c.name, ty, value: c.value, span: c.span })
+    }
+
+    fn table_items(&self, value: &Expr) -> Result<()> {
+        let ExprKind::ArrayLit(items) = &value.kind else {
+            return self.eval(value).map(|_| ()).map_err(|_| {
+                Diagnostic::error(value.span, "the items of a table are values known when compiling")
+                    .with_hint("numbers, texts, `comptime` constants, and what is computed from them")
+            });
+        };
+        items.iter().try_for_each(|item| self.table_items(item))
     }
 
     fn add_const(&mut self, c: &ComptimeConst) -> Result<()> {

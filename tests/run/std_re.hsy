@@ -16,7 +16,13 @@ managed fn main():
     m2 = re.search("(a)|(b)", "b")
     if m2 is not None:
         print(f"[{m2.group(1)}] [{m2.group(2)}]")
-    for bad in ["(ab", "a)", "*a", "[z-a]", "a**", "(?=a)", "\\1"]:
+    date = re.search("(?P<year>[0-9]{4})-(?P<month>[0-9]{2})", "on 2026-11-17")
+    if date is not None:
+        print(f"{date.named("year")} {date.named("month")}")
+    print(re.replace("(?P<a>\\w+) (?P<b>\\w+)", "hello world", "\\g<b> \\g<a>"))
+    print(f"{re.find_all("(?i)é[a-c]+ß", "ÉABß éCaß éxß")} {re.find_all("(?i)[^a-c]+", "xAbCy")}")
+    print(f"{re.find_all("(?m)^\\w+$", "one\ntwo words\nthree")} {re.find_all("(?s)a.b", "ab a\nb") == ["a\nb"]}")
+    for bad in ["(ab", "a)", "*a", "[z-a]", "a**", "(?=a)", "\\1", "(?x)a", "(?P<n>a)(?P<n>b)"]:
         try:
             re.search(bad, "")
         except PatternError as e:
@@ -31,6 +37,10 @@ managed fn main():
 # expect: ['a', 'a', 'bbb', 'bb']
 # expect: ['cat', 'cat']
 # expect: [] [b]
+# expect: 2026 11
+# expect: world hello
+# expect: ['ÉABß', 'éCaß'] ['x', 'y']
+# expect: ['one', 'three'] True
 # expect: (ab: 0 a group is not closed
 # expect: a): 1 a `)` closes no group
 # expect: *a: 0 nothing to repeat
@@ -38,3 +48,5 @@ managed fn main():
 # expect: a**: 2 multiple repeat
 # expect: (?=a): 0 lookaround is not supported
 # expect: \1: 0 backreferences are not supported
+# expect: (?x)a: 0 the flags are `i`, `m` and `s`, as in `(?im)`
+# expect: (?P<n>a)(?P<n>b): 8 two groups are named `n`

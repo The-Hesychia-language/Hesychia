@@ -737,8 +737,11 @@ typedef SOCKET hsy_sock;
 #else
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/time.h>
+#include <sys/select.h>
 #include <netdb.h>
 #include <unistd.h>
+#include <fcntl.h>
 typedef int hsy_sock;
 #define HSY_NO_SOCKET (-1)
 #define hsy_sock_close close
@@ -756,14 +759,89 @@ static __thread char hsy_net_name[1100];
 static void hsy_net_failed(void) {
 #ifdef _WIN32
     int code = WSAGetLastError();
+    if (code == WSAETIMEDOUT || code == WSAEWOULDBLOCK) {
+        snprintf(hsy_net_reason, sizeof hsy_net_reason, "timed out");
+        return;
+    }
     DWORD n = FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, NULL, (DWORD)code, 0,
                              hsy_net_reason, sizeof hsy_net_reason, NULL);
     while (n > 0 && (hsy_net_reason[n - 1] == '\n' || hsy_net_reason[n - 1] == '\r' || hsy_net_reason[n - 1] == '.'))
         hsy_net_reason[--n] = 0;
     if (n == 0) snprintf(hsy_net_reason, sizeof hsy_net_reason, "network error %d", code);
 #else
-    snprintf(hsy_net_reason, sizeof hsy_net_reason, "%s", strerror(errno));
+    bool late = errno == EAGAIN || errno == EWOULDBLOCK || errno == ETIMEDOUT || errno == EINPROGRESS;
+    snprintf(hsy_net_reason, sizeof hsy_net_reason, "%s", late ? "timed out" : strerror(errno));
 #endif
+}
+
+/* Waits until `s` can be read (or written, with `writing`), `seconds` at most. */
+static bool hsy_net_ready(hsy_sock s, double seconds, bool writing) {
+    fd_set set;
+    FD_ZERO(&set);
+    FD_SET(s, &set);
+    struct timeval limit;
+    limit.tv_sec = (long)seconds;
+    limit.tv_usec = (long)((seconds - (double)(long)seconds) * 1e6);
+    int found = select((int)s + 1, writing ? NULL : &set, writing ? &set : NULL, NULL, &limit);
+    if (found > 0) return true;
+    if (found == 0) snprintf(hsy_net_reason, sizeof hsy_net_reason, "timed out");
+    else hsy_net_failed();
+    return false;
+}
+
+/* Reads and writes on `s` fail once they have waited `seconds`; 0 waits without limit. */
+static void hsy_net_limit(hsy_sock s, double seconds) {
+    if (seconds <= 0) return;
+#ifdef _WIN32
+    DWORD limit = (DWORD)(seconds * 1000.0);
+    if (limit == 0) limit = 1;
+#else
+    struct timeval limit;
+    limit.tv_sec = (long)seconds;
+    limit.tv_usec = (long)((seconds - (double)(long)seconds) * 1e6);
+    if (limit.tv_sec == 0 && limit.tv_usec == 0) limit.tv_usec = 1;
+#endif
+    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (const char*)&limit, sizeof limit);
+    setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, (const char*)&limit, sizeof limit);
+}
+
+/* `connect` that gives up after `seconds`, when there is a limit. */
+static int hsy_net_reach(hsy_sock s, const struct sockaddr* address, socklen_t len, double seconds) {
+    if (seconds <= 0) return connect(s, address, len);
+#ifdef _WIN32
+    u_long on = 1, off = 0;
+    ioctlsocket(s, FIONBIO, &on);
+    int done = connect(s, address, len);
+    bool waiting = done != 0 && WSAGetLastError() == WSAEWOULDBLOCK;
+#else
+    int flags = fcntl(s, F_GETFL, 0);
+    fcntl(s, F_SETFL, flags | O_NONBLOCK);
+    int done = connect(s, address, len);
+    bool waiting = done != 0 && errno == EINPROGRESS;
+#endif
+    if (waiting) {
+        done = -1;
+        if (hsy_net_ready(s, seconds, true)) {
+            int problem = 0;
+            socklen_t size = sizeof problem;
+            getsockopt(s, SOL_SOCKET, SO_ERROR, (char*)&problem, &size);
+            if (problem == 0) done = 0;
+#ifdef _WIN32
+            else WSASetLastError(problem);
+#else
+            else errno = problem;
+#endif
+            if (problem != 0) hsy_net_failed();
+        }
+    } else if (done != 0) {
+        hsy_net_failed();
+    }
+#ifdef _WIN32
+    ioctlsocket(s, FIONBIO, &off);
+#else
+    fcntl(s, F_SETFL, flags);
+#endif
+    return done;
 }
 
 const uint8_t* hsy_net_error(void);
@@ -818,7 +896,7 @@ static const uint8_t* hsy_net_text(const struct sockaddr* a, socklen_t len) {
 }
 
 /* A socket for the first address of `host` that takes it: connected, or bound. -1 on failure. */
-static int64_t hsy_net_open(const char* host, int32_t port, int type, bool bind_it) {
+static int64_t hsy_net_open(const char* host, int32_t port, int type, bool bind_it, double seconds) {
     struct addrinfo* found = hsy_net_resolve(host, port, type, AF_UNSPEC, bind_it);
     if (!found) return -1;
     hsy_sock s = HSY_NO_SOCKET;
@@ -834,9 +912,18 @@ static int64_t hsy_net_open(const char* host, int32_t port, int type, bool bind_
             setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &on, sizeof on);
         }
 #endif
-        int done = bind_it ? bind(s, a->ai_addr, (socklen_t)a->ai_addrlen) : connect(s, a->ai_addr, (socklen_t)a->ai_addrlen);
-        if (done == 0) break;
-        hsy_net_failed();
+        int done;
+        if (bind_it) {
+            done = bind(s, a->ai_addr, (socklen_t)a->ai_addrlen);
+            if (done != 0) hsy_net_failed();
+        } else {
+            done = hsy_net_reach(s, a->ai_addr, (socklen_t)a->ai_addrlen, seconds);
+            if (done != 0 && seconds <= 0) hsy_net_failed();
+        }
+        if (done == 0) {
+            hsy_net_limit(s, seconds);
+            break;
+        }
         hsy_sock_close(s);
         s = HSY_NO_SOCKET;
     }
@@ -844,10 +931,10 @@ static int64_t hsy_net_open(const char* host, int32_t port, int type, bool bind_
     return s == HSY_NO_SOCKET ? -1 : (int64_t)s;
 }
 
-int64_t hsy_net_connect(const char* host, int32_t port);
+int64_t hsy_net_connect(const char* host, int32_t port, double seconds);
 int64_t hsy_net_listen(const char* host, int32_t port);
-int64_t hsy_net_accept(int64_t listener);
-int64_t hsy_net_udp(const char* host, int32_t port);
+int64_t hsy_net_accept(int64_t listener, double seconds);
+int64_t hsy_net_udp(const char* host, int32_t port, double seconds);
 int hsy_net_send(int64_t s, const uint8_t* data, size_t n, const char* host, int32_t port);
 int64_t hsy_net_receive(int64_t s, uint8_t* out, size_t size);
 const uint8_t* hsy_net_peer(int64_t s);
@@ -855,10 +942,12 @@ const uint8_t* hsy_net_sender(void);
 void hsy_net_close(int64_t s);
 uint8_t* hsy_net_wrap(int64_t s);
 
-int64_t hsy_net_connect(const char* host, int32_t port) { return hsy_net_open(host, port, SOCK_STREAM, false); }
+int64_t hsy_net_connect(const char* host, int32_t port, double seconds) {
+    return hsy_net_open(host, port, SOCK_STREAM, false, seconds);
+}
 
 int64_t hsy_net_listen(const char* host, int32_t port) {
-    int64_t s = hsy_net_open(host, port, SOCK_STREAM, true);
+    int64_t s = hsy_net_open(host, port, SOCK_STREAM, true, 0);
     if (s >= 0 && listen((hsy_sock)s, 128) != 0) {
         hsy_net_failed();
         hsy_sock_close((hsy_sock)s);
@@ -867,7 +956,8 @@ int64_t hsy_net_listen(const char* host, int32_t port) {
     return s;
 }
 
-int64_t hsy_net_accept(int64_t listener) {
+int64_t hsy_net_accept(int64_t listener, double seconds) {
+    if (seconds > 0 && !hsy_net_ready((hsy_sock)listener, seconds, false)) return -1;
     hsy_sock s = accept((hsy_sock)listener, NULL, NULL);
     if (s == HSY_NO_SOCKET) {
         hsy_net_failed();
@@ -877,6 +967,7 @@ int64_t hsy_net_accept(int64_t listener) {
     int on = 1;
     setsockopt(s, SOL_SOCKET, SO_NOSIGPIPE, &on, sizeof on);
 #endif
+    hsy_net_limit(s, seconds);
     return (int64_t)s;
 }
 
@@ -887,7 +978,9 @@ const uint8_t* hsy_net_peer(int64_t s) {
     return hsy_net_text((struct sockaddr*)&a, len);
 }
 
-int64_t hsy_net_udp(const char* host, int32_t port) { return hsy_net_open(host, port, SOCK_DGRAM, true); }
+int64_t hsy_net_udp(const char* host, int32_t port, double seconds) {
+    return hsy_net_open(host, port, SOCK_DGRAM, true, seconds);
+}
 
 int hsy_net_send(int64_t s, const uint8_t* data, size_t n, const char* host, int32_t port) {
     struct sockaddr_storage own;

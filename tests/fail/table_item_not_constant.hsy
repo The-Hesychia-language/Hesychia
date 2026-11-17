@@ -1,0 +1,6 @@
+manual fn one() -> i32:
+    return 1
+comptime T: array[i32, 2] = [1, one()]
+manual fn main():
+    const _x: i32 = T[0]
+# error: the items of a table are values known when compiling

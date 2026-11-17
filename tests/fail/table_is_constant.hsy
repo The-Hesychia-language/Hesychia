@@ -1,0 +1,4 @@
+comptime T: array[i32, 2] = [1, 2]
+manual fn main():
+    T[0] = 5
+# error: cannot assign to `T[...]`

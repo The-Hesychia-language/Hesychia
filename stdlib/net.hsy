@@ -1,16 +1,19 @@
 # net: TCP connections, which are `io.File`s read with `io.read` and written with `print`,
 # and UDP sockets. A host is a name or an IP address, IPv4 or IPv6.
+#
+# `timeout` is in seconds: a wait that lasts longer fails with an `IoError` whose reason is
+# "timed out". 0, the default, waits without limit.
 
 from io import File, IoError, from_connection
 
 @symbol("hsy_net_connect")
-priv extern fn c_connect(host: ptr[u8], port: i32) -> i64
+priv extern fn c_connect(host: ptr[u8], port: i32, timeout: f64) -> i64
 @symbol("hsy_net_listen")
 priv extern fn c_listen(host: ptr[u8], port: i32) -> i64
 @symbol("hsy_net_accept")
-priv extern fn c_accept(listener: i64) -> i64
+priv extern fn c_accept(listener: i64, timeout: f64) -> i64
 @symbol("hsy_net_udp")
-priv extern fn c_udp(host: ptr[u8], port: i32) -> i64
+priv extern fn c_udp(host: ptr[u8], port: i32, timeout: f64) -> i64
 @symbol("hsy_net_send")
 priv extern fn c_send(socket: i64, data: ptr[u8], count: size, host: ptr[u8], port: i32) -> i32
 @symbol("hsy_net_receive")
@@ -30,6 +33,7 @@ priv extern fn c_error() -> ptr[u8]
 manual struct Listener(Drop):
     priv socket: i64
     priv address: str
+    priv timeout: f64
 
     method drop(&mut self):
         c_close(self.socket)
@@ -45,34 +49,35 @@ manual struct Socket(Drop):
 priv manual fn failure(address: &str) -> IoError:
     return IoError(path=f"{address}", reason=str.from_c(c_error()))
 
-# A connection to `host` on `port`.
-manual fn connect(host: &str, port: i32) -> File raises IoError:
+# A connection to `host` on `port`. `timeout` limits connecting, then each read and write.
+manual fn connect(host: &str, port: i32, timeout: f64 = 0.0) -> File raises IoError:
     const address: str = f"{host}:{port}"
-    const socket: i64 = c_connect(host.to_c(), port)
+    const socket: i64 = c_connect(host.to_c(), port, timeout)
     if socket < 0:
         raise failure(&address)
     return from_connection(c_wrap(socket), &address)
 
 # Waits for connections on `port`; `host` is the address to take them on, "0.0.0.0" for any.
-manual fn listen(host: &str, port: i32) -> Listener raises IoError:
+# `timeout` limits each `accept`, then each read and write on the connections it gives.
+manual fn listen(host: &str, port: i32, timeout: f64 = 0.0) -> Listener raises IoError:
     const address: str = f"{host}:{port}"
     const socket: i64 = c_listen(host.to_c(), port)
     if socket < 0:
         raise failure(&address)
-    return Listener(socket=socket, address=address)
+    return Listener(socket=socket, address=address, timeout=timeout)
 
 # Waits for the next client, and gives its connection.
 manual fn accept(listener: &Listener) -> File raises IoError:
-    const socket: i64 = c_accept(listener.socket)
+    const socket: i64 = c_accept(listener.socket, listener.timeout)
     if socket < 0:
         raise failure(&listener.address)
     const peer: str = str.from_c(c_peer(socket))
     return from_connection(c_wrap(socket), &peer)
 
-# A UDP socket on `port`, 0 for any free one.
-manual fn udp(host: &str, port: i32) -> Socket raises IoError:
+# A UDP socket on `port`, 0 for any free one. `timeout` limits each `receive`.
+manual fn udp(host: &str, port: i32, timeout: f64 = 0.0) -> Socket raises IoError:
     const address: str = f"{host}:{port}"
-    const socket: i64 = c_udp(host.to_c(), port)
+    const socket: i64 = c_udp(host.to_c(), port, timeout)
     if socket < 0:
         raise failure(&address)
     return Socket(socket=socket, address=address)

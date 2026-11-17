@@ -1,0 +1,27 @@
+from io import print
+
+comptime BASE: i32 = 10
+comptime PRIMES: array[i32, 5] = [2, 3, 5, 7, BASE + 1]
+comptime NAMES: array[str, 3] = ["zero", "one", "two"]
+comptime GRID: array[array[u8, 2], 2] = [[1, 2], [3, 4]]
+priv comptime RATES: array[f64, 2] = [0.5, 1.5]
+
+manual fn total(values: &array[i32, 5]) -> i32:
+    mut sum: i32 = 0
+    for i in range(5):
+        sum += values[i]
+    return sum
+
+manual fn name_of(n: size) -> str:
+    return NAMES[n].copy()
+
+managed fn main():
+    print(f"{PRIMES[4]} {total(PRIMES)} {name_of(2)} {GRID[1][0]} {RATES[1]}")
+    for i in range(3):
+        print(f"{i}: {NAMES[i]} {len(NAMES[i])}")
+    print(f"{PRIMES}")
+# expect: 11 28 two 3 1.5
+# expect: 0: zero 4
+# expect: 1: one 3
+# expect: 2: two 3
+# expect: [2, 3, 5, 7, 11]

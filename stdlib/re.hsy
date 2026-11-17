@@ -3,6 +3,10 @@
 # Matching takes a time in proportion to the pattern and the text, whatever they are: the
 # engine follows every way through the pattern at once, so it has no backreferences and no
 # lookaround. `\d`, `\w`, `\s` and `\b` are ASCII; `$` is the end of the text.
+#
+# A pattern may start with flags: `(?i)` ignores the case of letters, `(?m)` makes `^` and
+# `$` hold at the start and end of each line, `(?s)` lets `.` take a line break; `(?im)`
+# gives several. `(?P<name>...)` names a group.
 
 # A pattern that cannot be read, and where it goes wrong, in characters.
 manual struct PatternError:
@@ -12,6 +16,7 @@ manual struct PatternError:
 # Where a pattern matched, and the text of its groups.
 manual struct Match:
     priv texts: vector[str]
+    priv names: vector[str]
     priv first: size
     priv last: size
 
@@ -20,6 +25,13 @@ manual struct Match:
         if n >= len(self.texts):
             panic(f"re: the pattern has no group {n}")
         return f"{self.texts[n]}"
+
+    # The text of the group that `(?P<name>...)` names.
+    method named(&self, name: &str) -> str:
+        for n in range(1, len(self.names)):
+            if self.names[n] == name:
+                return f"{self.texts[n]}"
+        panic(f"re: the pattern has no group named `{name}`")
 
     # Where the match starts, in characters.
     method start(&self) -> size:
@@ -51,6 +63,8 @@ comptime START: u32 = 0
 comptime END: u32 = 1
 comptime WORD_EDGE: u32 = 2
 comptime NOT_WORD_EDGE: u32 = 3
+comptime LINE_START: u32 = 4
+comptime LINE_END: u32 = 5
 
 comptime NO_LIMIT: u32 = 4294967295
 comptime MOST_REPEATS: u32 = 1000
@@ -67,10 +81,15 @@ priv manual struct Node:
     greedy: bool
     negated: bool
 
+# `names` has the name of each group, by its number: "" for group 0 and those without one.
 priv manual struct Parsed:
     nodes: vector[Node]
     bounds: vector[u32]
     groups: u32
+    names: vector[str]
+    ignore_case: bool
+    multiline: bool
+    dot_all: bool
 
 priv manual fn node(kind: u8, code: u32, left: size, right: size) -> Node:
     return Node(kind=kind, code=code, left=left, right=right, low=0, high=0, greedy=True, negated=False)
@@ -106,6 +125,67 @@ priv manual fn decoded(text: &str, i: size) -> (u32, size):
     for k in range(1, n):
         code = (code << 6) | (u32(text.byte(i + k)) & 63)
     return (code, n)
+
+priv manual fn encode(out: &mut vector[u8], code: u32):
+    if code < 128:
+        out.push(u8(code))
+    elif code < 2048:
+        out.push(u8(192 | (code >> 6)))
+        out.push(u8(128 | (code & 63)))
+    elif code < 65536:
+        out.push(u8(224 | (code >> 12)))
+        out.push(u8(128 | ((code >> 6) & 63)))
+        out.push(u8(128 | (code & 63)))
+    else:
+        out.push(u8(240 | (code >> 18)))
+        out.push(u8(128 | ((code >> 12) & 63)))
+        out.push(u8(128 | ((code >> 6) & 63)))
+        out.push(u8(128 | (code & 63)))
+
+# `code` in its other case, when that is one character; `code` itself otherwise.
+priv manual fn other_case(code: u32) -> u32:
+    if code < 128:
+        if (code >= 65 and code <= 90) or (code >= 97 and code <= 122):
+            return code ^ 32
+        return code
+    if code >= 55296 and code < 57344:
+        return code
+    mut bytes: vector[u8] = []
+    encode(&mut bytes, code)
+    const one: Optional[str] = str.from_bytes(&bytes)
+    if one is None:
+        return code
+    for changed in [one.lower(), one.upper()]:
+        const (other, n): (u32, size) = decoded(&changed, 0)
+        if other != code and n == byte_len(changed):
+            return other
+    return code
+
+# Adds to the ranges from `first` on what they match in the other case: the ASCII letters
+# of a range, and a single character of any script.
+priv manual fn add_other_cases(bounds: &mut vector[u32], first: size):
+    const end: size = len(bounds)
+    mut i: size = first
+    while i < end:
+        const low: u32 = bounds[i]
+        const high: u32 = bounds[i + 1]
+        if low == high:
+            const other: u32 = other_case(low)
+            if other != low:
+                bounds.push(other)
+                bounds.push(other)
+        else:
+            for start in [65, 97]:
+                mut a: u32 = u32(start)
+                mut b: u32 = a + 25
+                if low > a:
+                    a = low
+                if high < b:
+                    b = high
+                if a <= b:
+                    bounds.push(a ^ 32)
+                    bounds.push(b ^ 32)
+        i += 2
 
 priv manual fn is_digit(b: u8) -> bool:
     return b >= 48 and b <= 57
@@ -234,6 +314,8 @@ priv manual fn read_class(pattern: &str, at: &mut size, p: &mut Parsed) -> size 
             p.bounds.push(low)
             p.bounds.push(high)
             items += 1
+    if p.ignore_case:
+        add_other_cases(&mut p.bounds, first)
     const pairs: size = (len(p.bounds) - first) // 2
     mut n: Node = node(CLASS, 0, first, pairs)
     n.negated = negated
@@ -249,6 +331,33 @@ priv manual fn shorthand(p: &mut Parsed, letter: u8) -> size:
     mut n: Node = node(CLASS, 0, first, (len(p.bounds) - first) // 2)
     n.negated = letter < 97
     return add(p, n)
+
+# One character, in either case when the pattern ignores it.
+priv manual fn char_node(p: &mut Parsed, code: u32) -> size:
+    const other: u32 = other_case(code)
+    if not p.ignore_case or other == code:
+        return add(p, node(CHAR, code, 0, 0))
+    const first: size = len(p.bounds)
+    for c in [code, other]:
+        p.bounds.push(c)
+        p.bounds.push(c)
+    return add(p, node(CLASS, 0, first, 2))
+
+# The name of a group, from the `<` of `(?P<name>`.
+priv manual fn read_name(pattern: &str, at: &mut size) -> str raises PatternError:
+    const start: size = at
+    at += 1
+    mut name: vector[u8] = []
+    while at < byte_len(pattern) and is_word(pattern.byte(at)):
+        name.push(pattern.byte(at))
+        at += 1
+    if len(name) == 0 or is_digit(name[0]) or at >= byte_len(pattern) or pattern.byte(at) != 62:
+        raise error(pattern, start, "a group name is letters, digits and `_`, closed by `>`")
+    at += 1
+    const text: Optional[str] = str.from_bytes(&name)
+    if text is None:
+        return ""
+    return text
 
 # A number of a `{n,m}`, from `at`; None without digits.
 priv manual fn count_at(pattern: &str, at: &mut size) -> Optional[u32]:
@@ -272,15 +381,23 @@ priv manual fn read_atom(pattern: &str, at: &mut size, p: &mut Parsed, depth: si
         if at < byte_len(pattern) and pattern.byte(at) == 63:
             if at + 1 < byte_len(pattern) and pattern.byte(at + 1) == 58:
                 at += 2
-            elif at + 1 < byte_len(pattern) and pattern.byte(at + 1) == 80:
-                raise error(pattern, start, "named groups are not supported")
+            elif at + 2 < byte_len(pattern) and pattern.byte(at + 1) == 80 and pattern.byte(at + 2) == 60:
+                at += 2
+                const name: str = check read_name(pattern, at)
+                for known in &p.names:
+                    if known == name:
+                        raise error(pattern, start, f"two groups are named `{name}`")
+                p.groups += 1
+                number = p.groups
+                p.names.push(name)
             elif at + 1 < byte_len(pattern) and (pattern.byte(at + 1) == 61 or pattern.byte(at + 1) == 33 or pattern.byte(at + 1) == 60):
                 raise error(pattern, start, "lookaround is not supported")
             else:
-                raise error(pattern, start, "flags and other `(?` groups are not supported")
+                raise error(pattern, start, "flags go at the start of the pattern; other `(?` groups are not supported")
         else:
             p.groups += 1
             number = p.groups
+            p.names.push("")
         const inner: size = check read_alt(pattern, at, p, depth + 1)
         if at >= byte_len(pattern):
             raise error(pattern, start, "a group is not closed")
@@ -290,12 +407,18 @@ priv manual fn read_atom(pattern: &str, at: &mut size, p: &mut Parsed, depth: si
         return check read_class(pattern, at, p)
     if b == 46:
         at += 1
+        if p.dot_all:
+            return add(p, node(ANY, 1, 0, 0))
         return add(p, node(ANY, 0, 0, 0))
     if b == 94:
         at += 1
+        if p.multiline:
+            return add(p, node(ASSERT, LINE_START, 0, 0))
         return add(p, node(ASSERT, START, 0, 0))
     if b == 36:
         at += 1
+        if p.multiline:
+            return add(p, node(ASSERT, LINE_END, 0, 0))
         return add(p, node(ASSERT, END, 0, 0))
     if b == 42 or b == 43 or b == 63:
         raise error(pattern, at, "nothing to repeat")
@@ -315,10 +438,10 @@ priv manual fn read_atom(pattern: &str, at: &mut size, p: &mut Parsed, depth: si
         if letter == 90:
             return add(p, node(ASSERT, END, 0, 0))
         const code: u32 = check escaped_char(pattern, at, letter)
-        return add(p, node(CHAR, code, 0, 0))
+        return char_node(p, code)
     const (code, n): (u32, size) = decoded(pattern, at)
     at += n
-    return add(p, node(CHAR, code, 0, 0))
+    return char_node(p, code)
 
 # `{n}`, `{n,}`, `{,m}` or `{n,m}` from its `{`, as (low, high); None if it is not one, and
 # then the `{` is itself.
@@ -423,6 +546,7 @@ priv manual struct Program:
     insts: vector[Inst]
     bounds: vector[u32]
     slots: size
+    names: vector[str]
 
 priv manual fn inst(kind: u8, code: u32, x: size, y: size) -> Inst:
     return Inst(kind=kind, code=code, x=x, y=y, negated=False)
@@ -492,13 +616,34 @@ priv manual fn compile_node(p: &Parsed, index: size, prog: &mut Program) raises 
                     prog.insts[s].x = out
                     prog.insts[s].y = s + 1
 
+# The flags a pattern starts with, as `(?im)`; `at` goes past them.
+priv manual fn read_flags(pattern: &str, at: &mut size, p: &mut Parsed) raises PatternError:
+    if byte_len(pattern) < 3 or pattern.byte(0) != 40 or pattern.byte(1) != 63:
+        return
+    mut i: size = 2
+    while i < byte_len(pattern) and (pattern.byte(i) == 105 or pattern.byte(i) == 109 or pattern.byte(i) == 115):
+        i += 1
+    if i == 2 or i >= byte_len(pattern) or pattern.byte(i) != 41:
+        if i > 2 or (i < byte_len(pattern) and pattern.byte(i) >= 97 and pattern.byte(i) <= 122):
+            raise error(pattern, 0, "the flags are `i`, `m` and `s`, as in `(?im)`")
+        return
+    for k in range(2, i):
+        if pattern.byte(k) == 105:
+            p.ignore_case = True
+        elif pattern.byte(k) == 109:
+            p.multiline = True
+        else:
+            p.dot_all = True
+    at = i + 1
+
 priv manual fn compile(pattern: &str) -> Program raises PatternError:
-    mut p: Parsed = Parsed(nodes=[], bounds=[], groups=0)
+    mut p: Parsed = Parsed(nodes=[], bounds=[], groups=0, names=[""], ignore_case=False, multiline=False, dot_all=False)
     mut at: size = 0
+    check read_flags(pattern, &mut at, &mut p)
     const root: size = check read_alt(pattern, &mut at, &mut p, 0)
     if at < byte_len(pattern):
         raise error(pattern, at, "a `)` closes no group")
-    mut prog: Program = Program(insts=[], bounds=p.bounds.copy(), slots=(size(p.groups) + 1) * 2)
+    mut prog: Program = Program(insts=[], bounds=p.bounds.copy(), slots=(size(p.groups) + 1) * 2, names=p.names.copy())
     check emit(&mut prog, inst(SAVE, 0, 0, 0))
     check compile_node(&p, root, &mut prog)
     check emit(&mut prog, inst(SAVE, 1, 0, 0))
@@ -523,6 +668,10 @@ priv manual fn holds(kind: u32, text: &str, pos: size) -> bool:
         return pos == 0
     if kind == END:
         return pos == byte_len(text)
+    if kind == LINE_START:
+        return pos == 0 or text.byte(pos - 1) == 10
+    if kind == LINE_END:
+        return pos == byte_len(text) or text.byte(pos) == 10
     const before: bool = pos > 0 and is_word(text.byte(pos - 1))
     const after: bool = pos < byte_len(text) and is_word(text.byte(pos))
     if kind == WORD_EDGE:
@@ -534,7 +683,7 @@ priv manual fn takes(prog: &Program, i: size, c: u32) -> bool:
     if kind == CHAR:
         return prog.insts[i].code == c
     if kind == ANY:
-        return c != 10
+        return c != 10 or prog.insts[i].code == 1
     if kind == CLASS:
         const first: size = prog.insts[i].x
         mut found: bool = False
@@ -651,8 +800,8 @@ priv manual fn group_texts(text: &str, slots: &vector[i64]) -> vector[str]:
             texts.push(bytes_between(text, size(a), size(b)))
     return texts
 
-priv manual fn match_of(text: &str, slots: &vector[i64]) -> Match:
-    return Match(texts=group_texts(text, slots), first=chars_to(text, size(slots[0])), last=chars_to(text, size(slots[1])))
+priv manual fn match_of(text: &str, slots: &vector[i64], names: &vector[str]) -> Match:
+    return Match(texts=group_texts(text, slots), names=names.copy(), first=chars_to(text, size(slots[0])), last=chars_to(text, size(slots[1])))
 
 # --- what it gives -----------------------------------------------------------------
 
@@ -663,7 +812,7 @@ manual fn search(pattern: &str, text: &str) -> Optional[Match] raises PatternErr
     const slots: vector[i64] = run(&prog, text, 0, False)
     if len(slots) == 0:
         return None
-    return match_of(text, &slots)
+    return match_of(text, &slots, &prog.names)
 
 # The text of every match, one after the other.
 manual fn find_all(pattern: &str, text: &str) -> vector[str] raises PatternError:
@@ -684,7 +833,7 @@ manual fn find_all(pattern: &str, text: &str) -> vector[str] raises PatternError
     return out
 
 # `text` with every match replaced by `new`, where `\1` to `\9` and `\g<12>` stand for a group
-# and `\\` for a `\`.
+# or `\g<name>` a named one, and `\\` for a `\`.
 manual fn replace(pattern: &str, text: &str, new: &str) -> str raises PatternError:
     const prog: Program = check compile(pattern)
     const groups: size = prog.slots // 2
@@ -713,9 +862,19 @@ manual fn replace(pattern: &str, text: &str, new: &str) -> str raises PatternErr
                     elif d == 103 and i + 2 < byte_len(new) and new.byte(i + 2) == 60:
                         mut j: size = i + 3
                         const number: Optional[u32] = count_at(new, &mut j)
-                        if number is None or j >= byte_len(new) or new.byte(j) != 62:
-                            raise PatternError(at=chars_to(new, i), reason="a `\\g<...>` needs a group number")
-                        group = size(number)
+                        if number is not None:
+                            group = size(number)
+                        else:
+                            while j < byte_len(new) and is_word(new.byte(j)):
+                                j += 1
+                            const name: str = bytes_between(new, i + 3, j)
+                            for n in range(1, len(prog.names)):
+                                if prog.names[n] == name:
+                                    group = n
+                            if group is None:
+                                raise PatternError(at=chars_to(new, i), reason=f"the pattern has no group named `{name}`")
+                        if j >= byte_len(new) or new.byte(j) != 62:
+                            raise PatternError(at=chars_to(new, i), reason="a `\\g<...>` names a group or gives its number")
                         skip = j + 1 - i
                     if group is not None:
                         if group >= groups:
