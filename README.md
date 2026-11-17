@@ -9,18 +9,18 @@ The compiler, `hsy`, is written in Rust and emits C11, which the system C compil
 
 ## Install
 
-Hesychia needs `git`, [Rust](https://rustup.rs) 1.88 or later to build the compiler (`rustup update stable` brings an older one up to date), and a C compiler (`xcode-select --install` on macOS, `build-essential` on Debian and Ubuntu) to build programs.
+Hesychia needs `git`, [Rust](https://rustup.rs) 1.88 or later to build the compiler, and a C compiler.
 
 ```sh
 curl -fsSLO https://raw.githubusercontent.com/The-Hesychia-language/Hesychia/main/install.sh
 chmod +x install.sh && ./install.sh
 ```
 
-The script downloads the sources into `~/.hesychia/src`, builds `hsy` and puts it in `~/.hesychia/bin`, which it adds to `PATH` in `~/.bashrc` and `~/.zshrc` (and `~/.bash_profile` on macOS), once. Run it again to update: it fetches the latest sources and replaces the old `hsy`. `HESYCHIA_HOME` installs elsewhere than `~/.hesychia`. To remove Hesychia, delete `~/.hesychia` and the two lines under `# Hesychia` in those files.
+The script downloads the sources into `~/.hesychia/src`, builds `hsy` and puts it in `~/.hesychia/bin`, which it adds to `PATH` in `~/.bashrc` and `~/.zshrc` (and `~/.bash_profile` on macOS). Run it again to update: it fetches the latest sources and replaces the old `hsy`. `HESYCHIA_HOME` installs elsewhere than `~/.hesychia`. To remove Hesychia, delete `~/.hesychia` and the two lines under `# Hesychia` in those files.
 
 ## Learn
 
-[hsy-train](https://github.com/The-Hesychia-language/training-tool) teaches the language through exercises in the terminal: programs to fix, and small ones to build.
+[hsy-train](https://github.com/The-Hesychia-language/training-tool) teaches the language through exercises in the terminal: programs to fix, and small ones to build. Inspired by Rustlings and Leet code challenges.
 
 ## Status
 
@@ -56,10 +56,10 @@ Integer overflow, out-of-range conversions, division by zero, oversized shifts, 
 
 ```python
 managed fn steps(limit: i32) -> i64:
-    count = 0               # i32 at first...
+    count = 0               # default to i32
     i = 0
     while i < limit:
-        count += 5000000000 # ...widened to i64 for the whole function
+        count += 5000000000 # automatically widened count to i64 for the whole function
         i += 1
     return count
 ```
