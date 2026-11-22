@@ -52,7 +52,14 @@ impl Emitter<'_> {
             StmtKind::Assign { target, op, value } => self.emit_assign(target, *op, value),
             StmtKind::Expr(expr) => {
                 let code = self.emit_expr(expr);
-                let code = self.drop_temporary(expr.ty(), &code).unwrap_or(format!("{code};"));
+                // A statement expression whose value is not used (`check f()` alone): clang
+                // warns of the value unless it is cast away.
+                let discarded = if code.starts_with("({") && *expr.ty() != Type::Void {
+                    format!("(void){code};")
+                } else {
+                    format!("{code};")
+                };
+                let code = self.drop_temporary(expr.ty(), &code).unwrap_or(discarded);
                 self.line(&code);
             }
             StmtKind::If { branches, otherwise } => self.emit_if(branches, otherwise.as_deref()),

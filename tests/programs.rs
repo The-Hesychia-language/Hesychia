@@ -48,8 +48,11 @@ fn build(path: &Path, release: bool) -> (Output, PathBuf) {
 /// The generated C must also pass a strict compile; unused user variables are allowed.
 fn assert_clean_c(c_file: &Path) {
     let intel = fs::read_to_string(c_file).expect("readable C").contains("__asm__ volatile");
+    // An object file beside the C file: /dev/null is not on every system.
+    let object = c_file.with_extension("o");
     let status = Command::new("cc")
-        .args(["-std=c11", "-Wall", "-Wextra", "-Werror", "-Wno-unused-variable", "-c", "-o", "/dev/null"])
+        .args(["-std=c11", "-Wall", "-Wextra", "-Werror", "-Wno-unused-variable", "-c", "-o"])
+        .arg(&object)
         .args(intel.then_some("-masm=intel"))
         .arg(c_file)
         .status()
@@ -91,7 +94,10 @@ fn valid_programs_print_expected_output() {
             assert_clean_c(&binary.with_extension("c"));
             let run = Command::new(&binary).output().expect("program runs");
             assert!(run.status.success(), "{} exited with {}", path.display(), run.status);
-            assert_eq!(String::from_utf8_lossy(&run.stdout), expected, "output of {}", path.display());
+            // Windows' text mode ends lines with \r\n, as under Wine below.
+            let printed = String::from_utf8_lossy(&run.stdout);
+            let printed = if cfg!(windows) { printed.replace("\r\n", "\n") } else { printed.into_owned() };
+            assert_eq!(printed, expected, "output of {}", path.display());
             if !release {
                 assert_no_leaks(&binary);
             }

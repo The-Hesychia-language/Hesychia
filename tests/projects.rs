@@ -25,7 +25,14 @@ fn hsy(dir: &Path, args: &[&str]) -> Output {
 
 fn stdout(output: &Output) -> String {
     assert!(output.status.success(), "hsy failed: {}", String::from_utf8_lossy(&output.stderr));
-    String::from_utf8_lossy(&output.stdout).into_owned()
+    let printed = String::from_utf8_lossy(&output.stdout).into_owned();
+    // Windows' text mode ends lines with \r\n.
+    if cfg!(windows) { printed.replace("\r\n", "\n") } else { printed }
+}
+
+/// A program's file name as each system names it: `app`, or `app.exe` on Windows.
+fn program(path: &str) -> String {
+    format!("{path}{}", std::env::consts::EXE_SUFFIX)
 }
 
 fn git(dir: &Path, args: &[&str]) {
@@ -51,7 +58,7 @@ fn new_project_runs() {
     assert_eq!(stdout(&hsy(&dir.join("hello"), &["run"])), "Hello, Hesychia!\n");
     let built = hsy(&dir.join("hello/src"), &["build"]);
     assert!(built.status.success());
-    assert!(dir.join("hello/target/debug/hello").is_file());
+    assert!(dir.join(program("hello/target/debug/hello")).is_file());
 }
 
 #[test]
@@ -73,7 +80,9 @@ fn dependencies_by_path_and_git() {
     git(&text, &["commit", "-qam", "two"]);
 
     let app = dir.join("app");
-    let url = format!("file://{}", text.display());
+    // A file URL with `/` only, as TOML reads `\` as an escape: file:///D:/... on Windows.
+    let path = text.display().to_string().replace('\\', "/");
+    let url = if path.starts_with('/') { format!("file://{path}") } else { format!("file:///{path}") };
     write(
         &app.join("hesychia.toml"),
         &format!(
@@ -140,7 +149,8 @@ fn settings_name_the_targets() {
     let refused = hsy(&app, &["build"]);
     assert!(String::from_utf8_lossy(&refused.stderr).contains("unknown target `sparc-linux`"));
 
-    if !installed("x86_64-w64-mingw32-gcc") {
+    // A build for Windows beside the host's: on Windows, the two are the same.
+    if !installed("x86_64-w64-mingw32-gcc") || cfg!(windows) {
         return;
     }
     let host = format!("{}-{}-gnu", std::env::consts::ARCH, std::env::consts::OS);
@@ -184,13 +194,16 @@ fn settings_link_c_libraries() {
     let run = Command::new(HSY).arg("run").current_dir(&app).env("LIBRARY_PATH", &libs).output();
     assert_eq!(stdout(&run.expect("hsy runs")), "42\n");
 
-    // `:file` names the library's file, as installed without its development files.
-    write(
-        &dir.join("greeting/hesychia.toml"),
-        &format!("{manifest}\n[settings]\nlinks = [\":libgreet.a\"]\n"),
-    );
-    let run = Command::new(HSY).arg("run").current_dir(&app).env("LIBRARY_PATH", &libs).output();
-    assert_eq!(stdout(&run.expect("hsy runs")), "42\n");
+    // `:file` names the library's file, as installed without its development files: GNU ld's
+    // form, which Apple's linker does not take.
+    if !cfg!(target_os = "macos") {
+        write(
+            &dir.join("greeting/hesychia.toml"),
+            &format!("{manifest}\n[settings]\nlinks = [\":libgreet.a\"]\n"),
+        );
+        let run = Command::new(HSY).arg("run").current_dir(&app).env("LIBRARY_PATH", &libs).output();
+        assert_eq!(stdout(&run.expect("hsy runs")), "42\n");
+    }
 
     // Without the library, the C compiler is told about it, and fails.
     let missing = hsy(&app, &["build"]);
