@@ -244,14 +244,21 @@ impl Emitter<'_> {
             .collect();
         let mut roots: Vec<String> = waiting.keys().cloned().collect();
         roots.extend(self.types.panic_handler.clone());
+        // Everything any of them may need: the externs and module constants to declare.
         let used = reach::reachable(program, roots);
+        // The functions `main` reaches are written now. A waiting method, and what only it
+        // calls, are written once its struct is: a struct seen only in a signature no code
+        // reaches (a `set[i64]` parameter) is never defined, nor are its methods' callees.
+        let from_main = reach::reachable(program, self.types.panic_handler.clone().into_iter().collect());
         let (mut deferred, mut bodies): (Vec<_>, Vec<_>) =
             functions(program, &used).into_iter().partition(|(c_name, _)| waiting.contains_key(c_name));
+        bodies.retain(|(c_name, _)| from_main.contains(c_name));
         for (c_name, f) in &bodies {
             self.emit_fn(c_name, f);
         }
         let globals = self.emit_globals(program, &used);
         let entry = self.c_main(program);
+        let mut written: HashSet<String> = bodies.iter().map(|(c_name, _)| c_name.clone()).collect();
         loop {
             let (ready, rest): (Vec<_>, Vec<_>) =
                 deferred.into_iter().partition(|(c_name, _)| self.types.is_defined(&waiting[c_name]));
@@ -261,8 +268,20 @@ impl Emitter<'_> {
             }
             for (c_name, f) in &ready {
                 self.emit_fn(c_name, f);
+                written.insert(c_name.clone());
+            }
+            let callees =
+                reach::reachable_from(program, ready.iter().map(|(c_name, _)| c_name.clone()).collect());
+            let more: Vec<_> = functions(program, &callees)
+                .into_iter()
+                .filter(|(c_name, _)| !written.contains(c_name) && !waiting.contains_key(c_name))
+                .collect();
+            for (c_name, f) in &more {
+                self.emit_fn(c_name, f);
+                written.insert(c_name.clone());
             }
             bodies.extend(ready);
+            bodies.extend(more);
         }
         let declarations = self.declarations(program, &bodies, &used);
         let panic = self.panic_definition();

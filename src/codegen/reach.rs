@@ -9,7 +9,13 @@ use crate::ast::{
 /// C names of every function `main` can call, directly or not.
 /// The functions reachable from `main` and from `roots`, which the generated code may call
 /// on its own (operator and `Drop` methods).
-pub fn reachable(program: &Program, roots: Vec<String>) -> HashSet<String> {
+pub fn reachable(program: &Program, mut roots: Vec<String>) -> HashSet<String> {
+    roots.push(fn_c_name(0, "main"));
+    reachable_from(program, roots)
+}
+
+/// The functions reachable from `roots` alone, `roots` included.
+pub fn reachable_from(program: &Program, roots: Vec<String>) -> HashSet<String> {
     let bodies: HashMap<String, &FnDecl> = program
         .modules
         .iter()
@@ -38,7 +44,6 @@ pub fn reachable(program: &Program, roots: Vec<String>) -> HashSet<String> {
         .collect();
     let mut seen = HashSet::new();
     let mut pending = roots;
-    pending.push(fn_c_name(0, "main"));
     while let Some(name) = pending.pop() {
         if !seen.insert(name.clone()) {
             continue;
