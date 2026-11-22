@@ -1,0 +1,106 @@
+# offsec.cyclic: a De Bruijn ("cyclic") pattern, to find how many bytes of an overflow reach a
+# saved return address or a controlled register.
+#
+#     payload = cyclic.pattern(300)              # send this; the program crashes
+#     pad = cyclic.padding(0x6161616161616166)    # the value left in RSP/RIP -> the offset
+#
+# Every 4-byte window of the pattern is unique, so the few bytes that land in a register pin the
+# exact spot. `pattern` is the bytes to send; `padding` is the number of filler bytes that reach
+# that spot, or `None` when the value is not a window of the pattern (wrong width, or not ours).
+#
+# The alphabet is the 26 lowercase letters, so a window is unique for up to 26^4 = 456976 bytes:
+# past that a pattern would repeat, which `pattern` refuses.
+
+from offsec.binary import Order, Width
+
+# A pattern longer than the unique space: `requested` bytes asked for, `max` the most that stay
+# unique.
+manual struct CyclicError:
+    requested: size
+    max: size
+    reason: str
+
+# The letter for index `i`, 0 -> 'a' ... 25 -> 'z'.
+priv manual fn letter(i: size) -> u8:
+    return u8(97 + i)
+
+# The De Bruijn sequence B(26, 4), written into `out` until it holds `limit` bytes. The standard
+# Fredricksen-Kessler-Maiorana algorithm: it concatenates, in order, the Lyndon words over the
+# alphabet whose length divides 4. `a` is its scratch array, `t` the position being filled, `p`
+# the length of the current prefix.
+priv manual fn build(out: &mut vector[u8], limit: size, a: &mut vector[size], t: size, p: size):
+    const n: size = 4
+    const k: size = 26
+    if len(out) >= limit:
+        return
+    if t > n:
+        if n % p == 0:
+            mut j: size = 1
+            while j <= p:
+                if len(out) >= limit:
+                    return
+                out.push(letter(a[j]))
+                j += 1
+    else:
+        a[t] = a[t - p]
+        build(out, limit, a, t + 1, p)
+        mut j: size = a[t - p] + 1
+        while j < k:
+            a[t] = j
+            build(out, limit, a, t + 1, t)
+            j += 1
+
+# Generates the sequence into `out`, up to `limit` bytes.
+priv manual fn generate(out: &mut vector[u8], limit: size):
+    const n: size = 4
+    const k: size = 26
+    mut a: vector[size] = []
+    for _ in range(k * n + 1):
+        a.push(0)
+    build(out, limit, &mut a, 1, 1)
+
+# The 4-byte window to search for `value`: its bytes laid out in memory order, then the 4 at the
+# lowest addresses (the earliest in the pattern), which is where the overflow began.
+priv manual fn window_of(value: u64, width: Width, order: Order) -> vector[u8]:
+    mut total: size = 8
+    if width == Width.Bits32:
+        total = 4
+    mut bytes: vector[u8] = []
+    for i in range(total):
+        mut shift: size = i
+        if order == Order.Big:
+            shift = total - 1 - i
+        bytes.push(u8((value >> u64(8 * shift)) & u64(255)))
+    mut window: vector[u8] = []
+    for i in range(4):
+        window.push(bytes[i])
+    return window
+
+# The largest unique pattern: 26^4, the number of distinct 4-byte windows.
+priv manual fn unique_max() -> size:
+    return 26 * 26 * 26 * 26
+
+# A cyclic pattern of `length` bytes to send into a buffer. Raises `CyclicError` past 456976
+# bytes, where the pattern would repeat and an offset would no longer be unique.
+manual fn pattern(length: size) -> vector[u8] raises CyclicError:
+    const max: size = unique_max()
+    if length > max:
+        raise CyclicError(requested=length, max=max, reason=f"a pattern of {length} bytes would repeat a window; at most {max} stay unique")
+    mut out: vector[u8] = []
+    generate(&mut out, length)
+    return out
+
+# The offset of `value` in the pattern: the number of filler bytes before the spot it landed in,
+# or `None` when `value` is not a window of the pattern. `value` is what you read out of the
+# controlled register (or off the stack) after the crash. `width` defaults to 64-bit and `order`
+# to little-endian (x86); pass them for a 32-bit or big-endian target.
+manual fn padding(value: u64, width: Width = Width.Bits64, order: Order = Order.Little) -> Optional[size]:
+    const window: vector[u8] = window_of(value, width, order)
+    mut seq: vector[u8] = []
+    generate(&mut seq, unique_max())
+    mut i: size = 0
+    while i + 4 <= len(seq):
+        if seq[i] == window[0] and seq[i + 1] == window[1] and seq[i + 2] == window[2] and seq[i + 3] == window[3]:
+            return i
+        i += 1
+    return None

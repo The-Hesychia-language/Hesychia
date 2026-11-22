@@ -15,6 +15,13 @@ manual enum Order:
     Big
     Little
 
+# The pointer size of a target: how many bytes an address takes. Shared OffSec vocabulary, used
+# wherever a function works on addresses. `Bits64` is x86-64 and other 64-bit targets, `Bits32`
+# the 32-bit ones.
+manual enum Width:
+    Bits64
+    Bits32
+
 # A read or write that does not fit: `needed` bytes from `at`, in data of `length` bytes; or a
 # value too large for its field.
 manual struct BinaryError:
