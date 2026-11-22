@@ -8,7 +8,7 @@ priv extern fn c_fopen(path: ptr[u8], mode: ptr[u8]) -> Optional[ptr[u8]]
 priv extern fn c_remove(path: ptr[u8]) -> i32
 @symbol("rmdir")
 priv extern fn c_rmdir(path: ptr[u8]) -> i32
-@symbol("rename")
+@symbol("hsy_rename")
 priv extern fn c_rename(old: ptr[u8], new: ptr[u8]) -> i32
 @symbol("access")
 priv extern fn c_access(path: ptr[u8], mode: i32) -> i32
@@ -234,7 +234,7 @@ manual fn make_dir(path: &str) raises IoError:
         if c_mkdir(path.to_c(), 493) != 0:
             raise failure(path)
 
-# Renames or moves `old` to `new`.
+# Renames or moves `old` to `new`. A file already at `new` is replaced, on every system.
 manual fn rename(old: &str, new: &str) raises IoError:
     if c_rename(old.to_c(), new.to_c()) != 0:
         raise failure(old)

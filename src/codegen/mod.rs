@@ -231,12 +231,27 @@ int hsy_sync(FILE* f);
 int hsy_copy_mode(const char* path, const char* like);
 /* Moves `from` over `to`, replacing it at once; 0 when it worked. */
 int hsy_replace(const char* from, const char* to);
+/* For `fs.rename`: as `hsy_replace`, and on Windows to another drive too, by a copy. */
+int hsy_rename(const char* from, const char* to);
 /* The absolute path of an existing file, links resolved, to free; NULL when it does not exist. */
 uint8_t* hsy_real_path(const char* path);
 #if defined(_WIN32)
 #include <io.h>
 #include <fcntl.h>
 __declspec(dllimport) int __stdcall MoveFileExA(const char* from, const char* to, unsigned long flags);
+__declspec(dllimport) unsigned long __stdcall GetLastError(void);
+/* Moves with MoveFileExA, its error turned into `errno` for `hsy_error_text`. */
+static int hsy_move_file(const char* from, const char* to, unsigned long flags) {
+    if (MoveFileExA(from, to, flags)) return 0;
+    switch (GetLastError()) {
+        case 2: case 3: errno = ENOENT; break;      /* file or folder not found */
+        case 17: errno = EXDEV; break;              /* not the same drive */
+        case 80: case 183: errno = EEXIST; break;   /* already exists */
+        case 32: case 33: errno = EBUSY; break;     /* in use by another program */
+        default: errno = EACCES; break;
+    }
+    return -1;
+}
 FILE* hsy_create_new(const char* path) {
     int fd = _open(path, _O_CREAT | _O_EXCL | _O_WRONLY | _O_BINARY, _S_IREAD | _S_IWRITE);
     if (fd < 0) return NULL;
@@ -246,12 +261,10 @@ FILE* hsy_create_new(const char* path) {
 }
 int hsy_sync(FILE* f) { return fflush(f) == 0 && _commit(_fileno(f)) == 0 ? 0 : -1; }
 int hsy_copy_mode(const char* path, const char* like) { (void)path; (void)like; return 0; }
-int hsy_replace(const char* from, const char* to) {
-    /* MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH: C's rename refuses an existing file. */
-    if (MoveFileExA(from, to, 0x1 | 0x8)) return 0;
-    errno = EACCES;
-    return -1;
-}
+/* MOVEFILE_REPLACE_EXISTING, MOVEFILE_COPY_ALLOWED, MOVEFILE_WRITE_THROUGH: Windows' C
+   `rename` refuses a `to` that exists, where Unix's replaces it. */
+int hsy_replace(const char* from, const char* to) { return hsy_move_file(from, to, 0x1 | 0x8); }
+int hsy_rename(const char* from, const char* to) { return hsy_move_file(from, to, 0x1 | 0x2); }
 uint8_t* hsy_real_path(const char* path) {
     if (_access(path, 0) != 0) return NULL;
     return (uint8_t*)_fullpath(NULL, path, 0);
@@ -274,6 +287,7 @@ int hsy_copy_mode(const char* path, const char* like) {
     return chmod(path, 0666 & ~mask);
 }
 int hsy_replace(const char* from, const char* to) { return rename(from, to); }
+int hsy_rename(const char* from, const char* to) { return rename(from, to); }
 uint8_t* hsy_real_path(const char* path) { return (uint8_t*)realpath(path, NULL); }
 #endif
 

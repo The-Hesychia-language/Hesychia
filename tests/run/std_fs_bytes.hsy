@@ -60,6 +60,11 @@ manual fn run() raises IoError:
     # The limit: at the size it reads, below it raises.
     print(f"{refused("hsy-fs-bytes/all.bin", 5)} | {refused("hsy-fs-bytes/all.bin", 4)} | {refused("hsy-fs-bytes/nothing.bin", None)} | {refused("hsy-fs-bytes", None)}")
 
+    # `rename` replaces a file already at the new name, on Windows too.
+    check fs.rename("hsy-fs-bytes/plain.bin", "hsy-fs-bytes/empty.bin")
+    const moved: vector[u8] = check fs.read_bytes("hsy-fs-bytes/empty.bin")
+    print(f"{len(moved)} {fs.exists("hsy-fs-bytes/plain.bin")}")
+
     const file: Stat = check fs.stat("hsy-fs-bytes/all.bin")
     const folder: Stat = check fs.stat("hsy-fs-bytes", follow=False)
     const recent: bool = time.timestamp() - file.modified < 600.0 and file.modified <= time.timestamp() + 5.0
@@ -79,5 +84,6 @@ manual fn main():
 # expect: [0, 1, 2, 3, 4] 0
 # expect: 5 0
 # expect: read | larger than the limit of 4 bytes | refused | refused
+# expect: 5 False
 # expect: 5 True True True True
 # expect: missing nothing.bin
