@@ -49,5 +49,6 @@ fn filters_by_name_and_leaves_tests_out_of_programs() {
     assert!(output.status.success());
     // `hsy run` builds the program without its tests, the broken one included.
     let output = Command::new(HSY).args(["run", "checks.hsy"]).current_dir(&dir).output().expect("hsy runs");
-    assert_eq!(String::from_utf8_lossy(&output.stdout), "8\n");
+    // The program prints in Windows' text mode there, which ends lines with \r\n.
+    assert_eq!(String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n"), "8\n");
 }
