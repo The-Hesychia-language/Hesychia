@@ -24,6 +24,7 @@ const MODULES: &[(&str, &str)] = &[
     ("offsec.binary", include_str!("../stdlib/offsec/binary.hsy")),
     ("offsec.cyclic", include_str!("../stdlib/offsec/cyclic.hsy")),
     ("offsec.payload", include_str!("../stdlib/offsec/payload.hsy")),
+    ("offsec.tube", include_str!("../stdlib/offsec/tube.hsy")),
 ];
 
 /// The source of a standard module.

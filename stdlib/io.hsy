@@ -39,6 +39,8 @@ priv extern fn conn_failed(conn: ptr[u8]) -> i32
 priv extern fn conn_error() -> ptr[u8]
 @symbol("hsy_conn_close")
 priv extern fn conn_close(conn: ptr[u8])
+@symbol("hsy_conn_shutdown")
+priv extern fn conn_shutdown(conn: ptr[u8])
 
 # A file or stream that could not be read or written.
 manual struct IoError:
@@ -183,6 +185,12 @@ manual fn flush(f: &File) raises IoError:
 # Closes `f` now rather than at the end of its scope.
 manual fn close(owned _f: File):
     pass
+
+# Half-closes a connection in both directions, so a read blocked on it in another thread ends at
+# once. Does nothing for a file or a standard stream.
+manual fn shutdown(f: &File):
+    if f.connection:
+        conn_shutdown(f.handle)
 
 # Writes `bytes` in one system call, with no buffer, and gives how many were written: a
 # pipe or a socket may take fewer. `flush` first to keep the order of `print`'s text.

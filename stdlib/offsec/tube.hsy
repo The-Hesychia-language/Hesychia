@@ -1,0 +1,41 @@
+# offsec.tube: drive a remote target interactively over a connection.
+#
+#     const conn: File = check net.connect("host", 1337)
+#     # ... send the exploit that pops a shell ...
+#     tube.interactive(&conn)     # hand that shell to your terminal
+#
+# `interactive` bridges your terminal to the connection: it forwards the connection to stdout and
+# your keyboard to the connection, until you end input with Ctrl-D (or the connection closes and
+# you press Ctrl-D). Input is line-buffered: a line goes out when you press Enter.
+
+from io import File, IoError, stdin, stdout, sys_read, sys_write, shutdown
+from thread import scope
+
+# Writes every byte of `bytes` to `dst`, following short writes.
+priv manual fn write_all(dst: &File, owned bytes: vector[u8]) raises IoError:
+    mut rest: vector[u8] = bytes
+    while len(rest) > 0:
+        const n: size = check sys_write(dst, &rest)
+        if n == 0:
+            raise IoError(path="<tube>", reason="the write made no progress")
+        rest = rest[n:]
+
+# Forwards bytes from `src` to `dst` until either end closes or errors; any error just stops it.
+priv manual fn pump(src: &File, dst: &File):
+    while True:
+        try:
+            const bytes: vector[u8] = check sys_read(src, 4096)
+            if len(bytes) == 0:
+                return
+            check write_all(dst, bytes)
+        except IoError as _e:
+            return
+
+# Bridges the terminal to `conn`: the connection to stdout, the keyboard to the connection, until
+# you end input (Ctrl-D) or the connection closes. Input is line-buffered. Use it after the
+# exploit has opened a shell on the other end.
+manual fn interactive(conn: &File):
+    with scope() as s:
+        s.spawn(pump, conn, &stdout)
+        pump(&stdin, conn)
+        shutdown(conn)
