@@ -226,13 +226,35 @@ manual fn list_dir(path: &str) -> vector[str] raises IoError:
     c_closedir(folder)
     return paths
 
-manual fn make_dir(path: &str) raises IoError:
+priv manual fn create_dir(path: &str, mode: u32) -> i32:
     comptime if target.os == "windows":
-        if win_mkdir(path.to_c()) != 0:
-            raise failure(path)
+        return win_mkdir(path.to_c())
     else:
-        if c_mkdir(path.to_c(), 493) != 0:
+        return c_mkdir(path.to_c(), mode)
+
+# Creates the folder `path`. With `parents=True`, as `mkdir -p`: the folders missing along
+# the path are created too, and a folder already there is not an error. `mode` gives the
+# permissions of the folder itself (0o700: its owner alone), less those the process's umask
+# takes away, as for any new folder; the parents get 0o755. Windows has no such permissions.
+manual fn make_dir(path: &str, parents: bool = False, mode: u32 = 0o755) raises IoError:
+    if not parents:
+        if create_dir(path, mode) != 0:
             raise failure(path)
+        return
+    if kind(path, Kind.Dir):
+        return
+    const up: str = parent(path)
+    if up != path and up != "." and not kind(&up, Kind.Dir):
+        check make_dir(&up, True)
+    if create_dir(path, mode) != 0:
+        # The reason is read first: the tests below change it.
+        const refusal: IoError = failure(path)
+        # Created meanwhile by another program: what was asked is there.
+        if kind(path, Kind.Dir):
+            return
+        if exists(path):
+            raise IoError(path=f"{path}", reason="a file is there, not a folder")
+        raise refusal
 
 # Renames or moves `old` to `new`. A file already at `new` is replaced, on every system.
 manual fn rename(old: &str, new: &str) raises IoError:

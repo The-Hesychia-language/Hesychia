@@ -1,0 +1,42 @@
+import fs
+from io import print, IoError
+
+manual fn attempt(path: &str, parents: bool) -> str:
+    try:
+        check fs.make_dir(path, parents=parents)
+    except IoError as e:
+        if e.reason == "a file is there, not a folder":
+            return f"file at {fs.name(&e.path)}"
+        return "refused"
+    return "made"
+
+manual fn run() raises IoError:
+    # Left by a run that stopped halfway.
+    if fs.exists("hsy-make-dir"):
+        check fs.remove("hsy-make-dir", recursive=True)
+    # Without `parents`, a missing parent is refused, as before.
+    print(attempt("hsy-make-dir/a/b", False))
+    # With it, every folder along the path, and a trailing separator is fine.
+    print(attempt("hsy-make-dir/a/b/c/", True))
+    print(f"{fs.kind("hsy-make-dir/a/b/c", fs.Kind.Dir)}")
+    # A folder already there: an error alone, not with `parents`.
+    print(f"{attempt("hsy-make-dir/a", False)} {attempt("hsy-make-dir/a", True)}")
+    # A file where a folder is needed, at the end or along the way.
+    const empty: vector[u8] = []
+    check fs.write_bytes("hsy-make-dir/a/note", &empty)
+    print(f"{attempt("hsy-make-dir/a/note", True)} | {attempt("hsy-make-dir/a/note/deeper/x", True)}")
+    check fs.make_dir("hsy-make-dir/private", mode=0o700)
+    print(f"{fs.kind("hsy-make-dir/private", fs.Kind.Dir)}")
+    check fs.remove("hsy-make-dir", recursive=True)
+
+manual fn main():
+    try:
+        check run()
+    except IoError as e:
+        print(f"unexpected: {e.path}: {e.reason}")
+# expect: refused
+# expect: made
+# expect: True
+# expect: refused made
+# expect: file at note | file at note
+# expect: True
