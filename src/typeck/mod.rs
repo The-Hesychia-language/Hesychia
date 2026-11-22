@@ -392,6 +392,23 @@ impl<'a> Checker<'a> {
         self.copied.clear();
         self.moved_into.clear();
         self.probe.vars.clear();
+        // A pass that fails leaves its scopes open; a `managed` function is then checked
+        // again, and the functions after it must not see its variables.
+        let depth = self.scopes.len();
+        let result = self.check_scoped_body(f, params);
+        self.scopes.truncate(depth);
+        result?;
+        if self.ret != Type::Void && !stmt::always_returns(&f.body) {
+            return Err(Diagnostic::error(
+                f.span,
+                format!("function `{}` can end without returning a value", f.name),
+            ));
+        }
+        Ok(())
+    }
+
+    /// The parameters, then the body, in a scope of their own.
+    fn check_scoped_body(&mut self, f: &mut FnDecl, params: Vec<(String, Type)>) -> Result<()> {
         self.push_scope();
         for (position, (name, ty)) in params.into_iter().enumerate() {
             let ty = self.probe.declared_type(position).unwrap_or(ty);
@@ -406,12 +423,6 @@ impl<'a> Checker<'a> {
         }
         self.check_stmts(&mut f.body)?;
         self.pop_scope();
-        if self.ret != Type::Void && !stmt::always_returns(&f.body) {
-            return Err(Diagnostic::error(
-                f.span,
-                format!("function `{}` can end without returning a value", f.name),
-            ));
-        }
         Ok(())
     }
 
