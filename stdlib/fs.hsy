@@ -26,6 +26,28 @@ priv extern fn c_closedir(folder: ptr[u8]) -> i32
 priv extern fn path_kind(path: ptr[u8]) -> i32
 @symbol("hsy_error_text")
 priv extern fn error_text() -> ptr[u8]
+@symbol("fread")
+priv extern fn c_fread(data: ptr[u8], item: size, count: size, stream: ptr[u8]) -> size
+@symbol("fwrite")
+priv extern fn c_fwrite(data: ptr[u8], item: size, count: size, stream: ptr[u8]) -> size
+@symbol("ferror")
+priv extern fn c_ferror(stream: ptr[u8]) -> i32
+@symbol("fclose")
+priv extern fn c_fclose(stream: ptr[u8]) -> i32
+@symbol("free")
+priv extern fn c_free(memory: ptr[u8])
+@symbol("hsy_stat")
+priv extern fn c_stat(path: ptr[u8], follow: i32, out: ptr[i64]) -> i32
+@symbol("hsy_create_new")
+priv extern fn create_new(path: ptr[u8]) -> Optional[ptr[u8]]
+@symbol("hsy_sync")
+priv extern fn sync(stream: ptr[u8]) -> i32
+@symbol("hsy_copy_mode")
+priv extern fn copy_mode(path: ptr[u8], like: ptr[u8]) -> i32
+@symbol("hsy_replace")
+priv extern fn replace(old: ptr[u8], new: ptr[u8]) -> i32
+@symbol("hsy_real_path")
+priv extern fn real_path(path: ptr[u8]) -> Optional[ptr[u8]]
 
 # What `kind` tests a path for.
 manual enum Kind:
@@ -229,3 +251,135 @@ manual fn remove(path: &str, recursive: bool = False) raises IoError:
             raise failure(path)
     elif c_remove(path.to_c()) != 0:
         raise failure(path)
+
+# --- bytes and information ------------------------------------------------------
+
+# The whole content of the file at `path`. With a `limit`, a file larger than `limit` bytes
+# raises `IoError` instead of filling the memory: a file from outside can be of any size.
+manual fn read_bytes(path: &str, limit: Optional[size] = None) -> vector[u8] raises IoError:
+    const handle: Optional[ptr[u8]] = c_fopen(path.to_c(), "rb".to_c())
+    if handle is None:
+        raise failure(path)
+    mut data: vector[u8] = []
+    mut chunk: vector[u8] = []
+    for _ in range(65536):
+        chunk.push(0)
+    mut got: size = c_fread(ptr(&chunk[0]), 1, 65536, handle)
+    while got > 0:
+        if limit is not None and len(data) + got > limit:
+            c_fclose(handle)
+            raise IoError(path=f"{path}", reason=f"larger than the limit of {limit} bytes")
+        for i in range(got):
+            data.push(chunk[i])
+        got = c_fread(ptr(&chunk[0]), 1, 65536, handle)
+    # A folder opens on some systems, and fails here.
+    const failed: bool = c_ferror(handle) != 0
+    const reason: str = str.from_c(error_text())
+    c_fclose(handle)
+    if failed:
+        raise IoError(path=f"{path}", reason=reason)
+    return data
+
+# Writes `bytes` and closes the file; with `flush_to_disk`, the bytes reach the disk first.
+priv manual fn write_stream(handle: ptr[u8], path: &str, bytes: &vector[u8], flush_to_disk: bool) raises IoError:
+    mut written: size = len(bytes)
+    if len(bytes) > 0:
+        written = c_fwrite(ptr(&bytes[0]), 1, len(bytes), handle)
+    mut synced: bool = True
+    if flush_to_disk and written == len(bytes):
+        synced = sync(handle) == 0
+    const reason: str = str.from_c(error_text())
+    const closed: bool = c_fclose(handle) == 0
+    if written != len(bytes) or not synced or not closed:
+        raise IoError(path=f"{path}", reason=reason)
+
+priv manual fn remove_quietly(path: &str):
+    c_remove(path.to_c())
+
+# The file a write to `path` changes: the target of a link, so that the link stays one.
+priv manual fn write_target(path: &str) -> str:
+    const found: Optional[ptr[u8]] = real_path(path.to_c())
+    if found is None:
+        return f"{path}"
+    const target: str = str.from_c(found)
+    c_free(found)
+    return target
+
+# Writes `bytes` as the whole content of the file at `path`, created if needed.
+#
+# By default the write is atomic: the bytes go to a new file beside it, which is written to
+# the disk, given the permissions of the old one, then moved over it. Whoever reads `path`
+# sees the old content or the new, never half of it, even if the program stops halfway.
+# `atomic=False` writes into the file itself.
+manual fn write_bytes(path: &str, bytes: &vector[u8], atomic: bool = True) raises IoError:
+    if not atomic:
+        const handle: Optional[ptr[u8]] = c_fopen(path.to_c(), "wb".to_c())
+        if handle is None:
+            raise failure(path)
+        check write_stream(handle, path, bytes, False)
+        return
+    const target: str = write_target(path)
+    const folder: str = parent(&target)
+    const base: str = name(&target)
+    # A name nobody else uses, created only if it does not exist yet.
+    mut attempt: i64 = 0
+    while True:
+        const hidden: str = f".{base}.{attempt}.tmp"
+        const temporary: str = join(&folder, &hidden)
+        const handle: Optional[ptr[u8]] = create_new(temporary.to_c())
+        if handle is not None:
+            try:
+                check write_stream(handle, &temporary, bytes, True)
+            except IoError as e:
+                remove_quietly(&temporary)
+                raise IoError(path=f"{path}", reason=e.reason.copy())
+            if copy_mode(temporary.to_c(), target.to_c()) != 0 or replace(temporary.to_c(), target.to_c()) != 0:
+                const reason: IoError = failure(path)
+                remove_quietly(&temporary)
+                raise reason
+            return
+        # Only a name already taken (by a write that stopped halfway) is worth another try.
+        # The reason is read first: testing the name changes it.
+        const refusal: IoError = failure(path)
+        if attempt >= 999 or not exists(&temporary):
+            raise refusal
+        attempt += 1
+
+# What the file system knows of a file. Dates are in seconds since 1970, as
+# `time.timestamp()` gives them, so `time.date(info.modified)` writes one.
+manual struct Stat:
+    size: i64
+    kind: Kind
+    modified: f64
+    accessed: f64
+    # The last change of the file's information (Unix `ctime`): `None` on Windows.
+    changed: Optional[f64]
+    # `None` where the file system does not record it, as on some Linux file systems.
+    created: Optional[f64]
+
+priv manual fn seconds(values: &vector[i64], at: size) -> f64:
+    return f64(values[at]) + f64(values[at + 1]) / 1000000000.0
+
+# The information of the file at `path`. With `follow=False`, a link is described itself
+# instead of the file it points to, which is how a planted link is found.
+manual fn stat(path: &str, follow: bool = True) -> Stat raises IoError:
+    mut values: vector[i64] = []
+    for _ in range(12):
+        values.push(0)
+    mut follow_flag: i32 = 0
+    if follow:
+        follow_flag = 1
+    if c_stat(path.to_c(), follow_flag, ptr(&values[0])) != 0:
+        raise failure(path)
+    mut found: Kind = Kind.File
+    if values[1] == 2:
+        found = Kind.Dir
+    elif values[1] == 3:
+        found = Kind.Link
+    mut changed: Optional[f64] = None
+    if values[10] == 1:
+        changed = seconds(&values, 6)
+    mut created: Optional[f64] = None
+    if values[11] == 1:
+        created = seconds(&values, 8)
+    return Stat(size=values[0], kind=found, modified=seconds(&values, 2), accessed=seconds(&values, 4), changed=changed, created=created)
