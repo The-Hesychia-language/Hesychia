@@ -48,8 +48,11 @@ fn build(path: &Path, release: bool) -> (Output, PathBuf) {
 /// The generated C must also pass a strict compile; unused user variables are allowed.
 fn assert_clean_c(c_file: &Path) {
     let intel = fs::read_to_string(c_file).expect("readable C").contains("__asm__ volatile");
+    // An object file beside the C file: /dev/null is not on every system.
+    let object = c_file.with_extension("o");
     let status = Command::new("cc")
-        .args(["-std=c11", "-Wall", "-Wextra", "-Werror", "-Wno-unused-variable", "-c", "-o", "/dev/null"])
+        .args(["-std=c11", "-Wall", "-Wextra", "-Werror", "-Wno-unused-variable", "-c", "-o"])
+        .arg(&object)
         .args(intel.then_some("-masm=intel"))
         .arg(c_file)
         .status()
