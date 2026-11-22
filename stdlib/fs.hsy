@@ -477,3 +477,172 @@ manual fn stat(path: &str, follow: bool = True) -> Stat raises IoError:
     if values[11] == 1:
         created = seconds(&values, 8)
     return Stat(size=values[0], kind=found, modified=seconds(&values, 2), accessed=seconds(&values, 4), changed=changed, created=created)
+
+# --- names and paths from outside -------------------------------------------------
+
+# Characters a name from outside never keeps: control characters (C0 and C1, terminal
+# escapes among them), the separators and those Windows forbids, and the Unicode controls
+# that reverse the reading order ("invoice\u{202E}fdp.exe" shows as "invoiceexe.pdf").
+priv manual fn forbidden(code: u32, ascii: bool) -> bool:
+    if code < 32 or code == 127 or (code >= 128 and code <= 159):
+        return True
+    if code == 47 or code == 92 or code == 58 or code == 60 or code == 62 or code == 34 or code == 124 or code == 63 or code == 42:
+        return True
+    if (code >= 8234 and code <= 8238) or (code >= 8294 and code <= 8297) or code == 8206 or code == 8207 or code == 1564:
+        return True
+    return ascii and code >= 128
+
+# How many bytes the UTF-8 character starting with `lead` takes.
+priv manual fn char_len(lead: u8) -> size:
+    if lead < 128:
+        return 1
+    if lead < 224:
+        return 2
+    if lead < 240:
+        return 3
+    return 4
+
+# The code point of the character of `count` bytes at `at`.
+priv manual fn code_at(text: &str, at: size, count: size) -> u32:
+    if count == 1:
+        return u32(text.byte(at))
+    mut code: u32 = u32(text.byte(at)) & (u32(127) >> u32(count))
+    for k in range(1, count):
+        code = (code << 6) | (u32(text.byte(at + k)) & 63)
+    return code
+
+# `text` without the dots and spaces at its end, which Windows drops from a name.
+priv manual fn without_trailing_dots(text: &str) -> str:
+    mut end: size = byte_len(text)
+    while end > 0 and (text.byte(end - 1) == 46 or text.byte(end - 1) == 32):
+        end -= 1
+    return bytes_between(text, 0, end)
+
+# Where the last `.` of `text` is.
+priv manual fn last_dot(text: &str) -> Optional[size]:
+    mut i: size = byte_len(text)
+    while i > 0:
+        i -= 1
+        if text.byte(i) == 46:
+            return i
+    return None
+
+# Whether `name` opens a device on Windows instead of a file: CON, PRN, AUX, NUL, COM0-9,
+# LPT0-9, in any case, with or without an extension ("nul.txt" is the device too).
+priv manual fn is_device_name(name: &str) -> bool:
+    mut base: str = name.upper()
+    const dot: Optional[size] = base.find(".")
+    if dot is not None:
+        base = bytes_between(&base, 0, dot)
+    # "CON .txt" is the device too.
+    mut end: size = byte_len(base)
+    while end > 0 and base.byte(end - 1) == 32:
+        end -= 1
+    base = bytes_between(&base, 0, end)
+    if base == "CON" or base == "PRN" or base == "AUX" or base == "NUL":
+        return True
+    if (base.starts_with("COM") or base.starts_with("LPT")) and len(base) == 4:
+        const last: str = bytes_between(&base, 3, byte_len(base))
+        return "0123456789¹²³".contains(&last)
+    return False
+
+# `name` cut to at most 255 bytes, the limit of most file systems, keeping its extension and
+# never cutting a character in two.
+priv manual fn shortened(name: &str) -> str:
+    mut ext: str = ""
+    const dot: Optional[size] = last_dot(name)
+    if dot is not None and dot > 0 and byte_len(name) - dot <= 32:
+        ext = bytes_between(name, dot, byte_len(name))
+    const body_end: size = byte_len(name) - byte_len(ext)
+    # The longest start of the name that fits, ending between two characters.
+    mut end: size = 0
+    while end < body_end:
+        const next: size = end + char_len(name.byte(end))
+        if next + byte_len(ext) > 255:
+            break
+        end = next
+    const kept: str = bytes_between(name, 0, end)
+    return without_trailing_dots(&kept) + ext
+
+# A file name made from `text` taken from outside (a URL, an HTTP header, an attachment),
+# that can be created in a folder on every system and stays in it: what a name may not hold
+# is replaced by `_`, so the result is a plain name, never a path.
+#
+#     fs.sanitize_name("../../.bashrc")       "___.._.bashrc"
+#     fs.sanitize_name("C:\\evil\\run.exe")    "C__evil_run.exe"
+#     fs.sanitize_name("CON.txt")             "_CON.txt"
+#
+# Replaced: control characters, `/ \ : < > " | ? *`, the Unicode controls that reverse the
+# reading order, and at the start `.`, ` ` and `-` (hidden files, `..`, names read as options).
+# Removed: dots and spaces at the end, which Windows drops. A Windows device name (CON, NUL,
+# COM1...) gets a `_` in front, on every system, so that the file can be copied there; the name
+# is cut to 255 bytes, keeping its extension. With `ascii=True`, every character outside
+# ASCII is replaced too. Nothing usable left gives `fallback`, as given.
+#
+# It does not judge the extension: whether a `.exe` may be saved is the caller's choice.
+manual fn sanitize_name(text: &str, fallback: &str = "file", ascii: bool = False) -> str:
+    mut pieces: vector[str] = []
+    mut at: size = 0
+    while at < byte_len(text):
+        const count: size = char_len(text.byte(at))
+        if forbidden(code_at(text, at, count), ascii):
+            pieces.push("_")
+        else:
+            pieces.push(bytes_between(text, at, at + count))
+        at += count
+    while len(pieces) > 0 and (pieces[len(pieces) - 1] == "." or pieces[len(pieces) - 1] == " "):
+        pieces.pop()
+    for i in range(len(pieces)):
+        if pieces[i] == "." or pieces[i] == " " or pieces[i] == "-":
+            pieces[i] = "_"
+        else:
+            break
+    if len(pieces) == 0:
+        return f"{fallback}"
+    mut name: str = "".join(&pieces)
+    if is_device_name(&name):
+        name = "_" + name
+    if byte_len(name) > 255:
+        name = shortened(&name)
+    return name
+
+priv manual fn outside(path: &str, reason: &str) -> IoError:
+    return IoError(path=f"{path}", reason=f"{reason}: it would not stay within the folder")
+
+# Joins `path` to `folder`, and raises `IoError` if the result would leave `folder`: for paths
+# taken from outside, as the names in an archive. `fs.join_within("out", "docs/a.txt")` is
+# "out/docs/a.txt"; "../a.txt", "/etc/passwd", "C:\\a.txt" and "\\\\server\\a" raise.
+#
+# `/` and `\` separate names on every system, so the result is the same everywhere. A `..`
+# that stays inside is followed (`docs/../a.txt` is `out/a.txt`); the result holds no `.` nor
+# `..`. Only the text is checked: a link already inside `folder` that points outside is not
+# seen, so links taken from outside need their own care.
+manual fn join_within(folder: &str, path: &str) -> str raises IoError:
+    const n: size = byte_len(path)
+    if n > 0 and (path.byte(0) == 47 or path.byte(0) == 92):
+        raise outside(path, "an absolute path")
+    if n >= 2 and path.byte(1) == 58 and (path.byte(0) | 32) >= 97 and (path.byte(0) | 32) <= 122:
+        raise outside(path, "a path on a drive")
+    mut kept: vector[str] = []
+    mut start: size = 0
+    for i in range(n + 1):
+        if i < n and path.byte(i) == 0:
+            raise outside(path, "a NUL byte")
+        if i == n or path.byte(i) == 47 or path.byte(i) == 92:
+            const part: str = bytes_between(path, start, i)
+            start = i + 1
+            if part == "" or part == ".":
+                continue
+            if part == "..":
+                if len(kept) == 0:
+                    raise outside(path, "`..` above the folder")
+                kept.pop()
+                continue
+            # Windows drops the dots and spaces at the end of a name: ".. " would be "..".
+            if byte_len(without_trailing_dots(&part)) == 0:
+                raise outside(path, "a name of dots and spaces")
+            kept.push(part)
+    mut joined: str = f"{folder}"
+    for part in kept:
+        joined = join(&joined, &part)
+    return joined
