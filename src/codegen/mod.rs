@@ -146,6 +146,151 @@ int hsy_path_kind(const char* path) {
 }
 #endif
 
+/* What the file system knows of a file, for `fs.stat`, in `out`: its size, its kind (1 a
+   file, 2 a folder, 3 a link), then the seconds and nanoseconds of its modification, its
+   access, its last change of information and its creation, and whether these last two are
+   known. Links are followed unless `follow` is 0. 0 when it worked, -1 with `errno` set. */
+int hsy_stat(const char* path, int follow, int64_t* out);
+#if defined(_WIN32)
+int hsy_stat(const char* path, int follow, int64_t* out) {
+    (void)follow;
+    struct _stat64 st;
+    if (_stat64(path, &st) != 0) return -1;
+    out[0] = (int64_t)st.st_size;
+    out[1] = (st.st_mode & _S_IFDIR) ? 2 : 1;
+    out[2] = (int64_t)st.st_mtime; out[3] = 0;
+    out[4] = (int64_t)st.st_atime; out[5] = 0;
+    /* Windows has no change time; its st_ctime is the creation. */
+    out[6] = 0; out[7] = 0;
+    out[8] = (int64_t)st.st_ctime; out[9] = 0;
+    out[10] = 0; out[11] = 1;
+    return 0;
+}
+#else
+#include <fcntl.h>
+static void hsy_stat_common(const struct stat* st, int64_t* out) {
+    out[0] = (int64_t)st->st_size;
+    out[1] = S_ISLNK(st->st_mode) ? 3 : S_ISDIR(st->st_mode) ? 2 : 1;
+#if defined(__APPLE__)
+    out[2] = st->st_mtimespec.tv_sec; out[3] = st->st_mtimespec.tv_nsec;
+    out[4] = st->st_atimespec.tv_sec; out[5] = st->st_atimespec.tv_nsec;
+    out[6] = st->st_ctimespec.tv_sec; out[7] = st->st_ctimespec.tv_nsec;
+    out[8] = st->st_birthtimespec.tv_sec; out[9] = st->st_birthtimespec.tv_nsec;
+    out[10] = 1; out[11] = 1;
+#else
+    out[2] = st->st_mtim.tv_sec; out[3] = st->st_mtim.tv_nsec;
+    out[4] = st->st_atim.tv_sec; out[5] = st->st_atim.tv_nsec;
+    out[6] = st->st_ctim.tv_sec; out[7] = st->st_ctim.tv_nsec;
+    out[8] = 0; out[9] = 0;
+    out[10] = 1; out[11] = 0;
+#endif
+}
+#if defined(__linux__)
+/* Linux's statx, which also gives the creation where the file system records it. Its
+   layout is fixed by the kernel; declared here as glibc only shows it with _GNU_SOURCE. */
+struct hsy_statx_time { int64_t tv_sec; uint32_t tv_nsec; int32_t reserved; };
+struct hsy_statx {
+    uint32_t mask, blksize; uint64_t attributes; uint32_t nlink, uid, gid; uint16_t mode, pad;
+    uint64_t ino, size, blocks, attributes_mask;
+    struct hsy_statx_time atime, btime, ctime, mtime;
+    uint32_t rdev_major, rdev_minor, dev_major, dev_minor; uint64_t spare[14];
+};
+int statx(int dir, const char* path, int flags, unsigned int mask, struct hsy_statx* out);
+#endif
+int hsy_stat(const char* path, int follow, int64_t* out) {
+#if defined(__linux__)
+    struct hsy_statx sx;
+    /* STATX_BASIC_STATS | STATX_BTIME. */
+    if (statx(AT_FDCWD, path, follow ? 0 : AT_SYMLINK_NOFOLLOW, 0xfffu, &sx) == 0) {
+        out[0] = (int64_t)sx.size;
+        out[1] = S_ISLNK(sx.mode) ? 3 : S_ISDIR(sx.mode) ? 2 : 1;
+        out[2] = sx.mtime.tv_sec; out[3] = sx.mtime.tv_nsec;
+        out[4] = sx.atime.tv_sec; out[5] = sx.atime.tv_nsec;
+        out[6] = sx.ctime.tv_sec; out[7] = sx.ctime.tv_nsec;
+        out[8] = sx.btime.tv_sec; out[9] = sx.btime.tv_nsec;
+        out[10] = 1; out[11] = (sx.mask & 0x800u) ? 1 : 0;
+        return 0;
+    }
+    /* An older kernel, or a sandbox that refuses statx: plain stat. */
+    if (errno != ENOSYS && errno != EPERM) return -1;
+#endif
+    struct stat st;
+    if ((follow ? stat(path, &st) : lstat(path, &st)) != 0) return -1;
+    hsy_stat_common(&st, out);
+    return 0;
+}
+#endif
+
+/* For `fs.write_bytes`: a file created for writing only if it does not exist yet, readable by
+   its owner alone until it is given its final permissions; NULL with `errno` set. */
+FILE* hsy_create_new(const char* path);
+/* Writes a file's buffers to the disk itself; 0 when it worked. */
+int hsy_sync(FILE* f);
+/* Gives `path` the permissions of `like`, or the default ones of a new file when `like`
+   does not exist. */
+int hsy_copy_mode(const char* path, const char* like);
+/* Moves `from` over `to`, replacing it at once; 0 when it worked. */
+int hsy_replace(const char* from, const char* to);
+/* For `fs.rename`: as `hsy_replace`, and on Windows to another drive too, by a copy. */
+int hsy_rename(const char* from, const char* to);
+/* The absolute path of an existing file, links resolved, to free; NULL when it does not exist. */
+uint8_t* hsy_real_path(const char* path);
+#if defined(_WIN32)
+#include <io.h>
+#include <fcntl.h>
+__declspec(dllimport) int __stdcall MoveFileExA(const char* from, const char* to, unsigned long flags);
+__declspec(dllimport) unsigned long __stdcall GetLastError(void);
+/* Moves with MoveFileExA, its error turned into `errno` for `hsy_error_text`. */
+static int hsy_move_file(const char* from, const char* to, unsigned long flags) {
+    if (MoveFileExA(from, to, flags)) return 0;
+    switch (GetLastError()) {
+        case 2: case 3: errno = ENOENT; break;      /* file or folder not found */
+        case 17: errno = EXDEV; break;              /* not the same drive */
+        case 80: case 183: errno = EEXIST; break;   /* already exists */
+        case 32: case 33: errno = EBUSY; break;     /* in use by another program */
+        default: errno = EACCES; break;
+    }
+    return -1;
+}
+FILE* hsy_create_new(const char* path) {
+    int fd = _open(path, _O_CREAT | _O_EXCL | _O_WRONLY | _O_BINARY, _S_IREAD | _S_IWRITE);
+    if (fd < 0) return NULL;
+    FILE* f = _fdopen(fd, \"wb\");
+    if (!f) _close(fd);
+    return f;
+}
+int hsy_sync(FILE* f) { return fflush(f) == 0 && _commit(_fileno(f)) == 0 ? 0 : -1; }
+int hsy_copy_mode(const char* path, const char* like) { (void)path; (void)like; return 0; }
+/* MOVEFILE_REPLACE_EXISTING, MOVEFILE_COPY_ALLOWED, MOVEFILE_WRITE_THROUGH: Windows' C
+   `rename` refuses a `to` that exists, where Unix's replaces it. */
+int hsy_replace(const char* from, const char* to) { return hsy_move_file(from, to, 0x1 | 0x8); }
+int hsy_rename(const char* from, const char* to) { return hsy_move_file(from, to, 0x1 | 0x2); }
+uint8_t* hsy_real_path(const char* path) {
+    if (_access(path, 0) != 0) return NULL;
+    return (uint8_t*)_fullpath(NULL, path, 0);
+}
+#else
+#include <unistd.h>
+FILE* hsy_create_new(const char* path) {
+    int fd = open(path, O_CREAT | O_EXCL | O_WRONLY, 0600);
+    if (fd < 0) return NULL;
+    FILE* f = fdopen(fd, \"wb\");
+    if (!f) close(fd);
+    return f;
+}
+int hsy_sync(FILE* f) { return fflush(f) == 0 && fsync(fileno(f)) == 0 ? 0 : -1; }
+int hsy_copy_mode(const char* path, const char* like) {
+    struct stat st;
+    if (stat(like, &st) == 0) return chmod(path, st.st_mode & 07777);
+    mode_t mask = umask(0);
+    umask(mask);
+    return chmod(path, 0666 & ~mask);
+}
+int hsy_replace(const char* from, const char* to) { return rename(from, to); }
+int hsy_rename(const char* from, const char* to) { return rename(from, to); }
+uint8_t* hsy_real_path(const char* path) { return (uint8_t*)realpath(path, NULL); }
+#endif
+
 /* Runs a program found on the PATH with the arguments `argv` (ended by NULL) and gives its
    exit code, or -1 when it cannot start; for `os.run`, as `environ` is out of Hesychia's reach. */
 int hsy_run(char** argv);

@@ -1,0 +1,89 @@
+import fs
+import time
+from io import print, IoError
+from fs import Stat, Kind
+
+manual fn bytes_upto(n: size) -> vector[u8]:
+    mut out: vector[u8] = []
+    for i in range(n):
+        out.push(u8(i % 256))
+    return out
+
+manual fn refused(path: &str, limit: Optional[size]) -> str:
+    try:
+        check fs.read_bytes(path, limit=limit)
+    except IoError as e:
+        if e.reason.starts_with("larger"):
+            return e.reason.copy()
+        return "refused"
+    return "read"
+
+manual fn leftovers(folder: &str) -> size:
+    mut count: size = 0
+    for path in check_list(folder):
+        if path.ends_with(".tmp"):
+            count += 1
+    return count
+
+manual fn check_list(folder: &str) -> vector[str]:
+    try:
+        return check fs.list_dir(folder)
+    except IoError as _e:
+        return []
+
+manual fn run() raises IoError:
+    # Left by a run that stopped halfway.
+    if fs.exists("hsy-fs-bytes"):
+        check fs.remove("hsy-fs-bytes", recursive=True)
+    check fs.make_dir("hsy-fs-bytes")
+
+    # Every byte value, \0 and \r\n included, comes back as it went.
+    const data: vector[u8] = bytes_upto(70000)
+    check fs.write_bytes("hsy-fs-bytes/all.bin", &data)
+    const back: vector[u8] = check fs.read_bytes("hsy-fs-bytes/all.bin")
+    print(f"{len(back)} {back == data}")
+
+    # An atomic write over a file replaces it whole, and leaves no temporary file.
+    const short: vector[u8] = bytes_upto(5)
+    check fs.write_bytes("hsy-fs-bytes/all.bin", &short)
+    const after: vector[u8] = check fs.read_bytes("hsy-fs-bytes/all.bin")
+    print(f"{after} {leftovers("hsy-fs-bytes")}")
+
+    # Written in place, and an empty file.
+    check fs.write_bytes("hsy-fs-bytes/plain.bin", &short, atomic=False)
+    const empty: vector[u8] = []
+    check fs.write_bytes("hsy-fs-bytes/empty.bin", &empty)
+    const plain: vector[u8] = check fs.read_bytes("hsy-fs-bytes/plain.bin")
+    const none: vector[u8] = check fs.read_bytes("hsy-fs-bytes/empty.bin", limit=0)
+    print(f"{len(plain)} {len(none)}")
+
+    # The limit: at the size it reads, below it raises.
+    print(f"{refused("hsy-fs-bytes/all.bin", 5)} | {refused("hsy-fs-bytes/all.bin", 4)} | {refused("hsy-fs-bytes/nothing.bin", None)} | {refused("hsy-fs-bytes", None)}")
+
+    # `rename` replaces a file already at the new name, on Windows too.
+    check fs.rename("hsy-fs-bytes/plain.bin", "hsy-fs-bytes/empty.bin")
+    const moved: vector[u8] = check fs.read_bytes("hsy-fs-bytes/empty.bin")
+    print(f"{len(moved)} {fs.exists("hsy-fs-bytes/plain.bin")}")
+
+    const file: Stat = check fs.stat("hsy-fs-bytes/all.bin")
+    const folder: Stat = check fs.stat("hsy-fs-bytes", follow=False)
+    const recent: bool = time.timestamp() - file.modified < 600.0 and file.modified <= time.timestamp() + 5.0
+    print(f"{file.size} {file.kind == Kind.File} {folder.kind == Kind.Dir} {recent} {file.accessed > 0.0}")
+    try:
+        check fs.stat("hsy-fs-bytes/nothing.bin")
+    except IoError as e:
+        print(f"missing {fs.name(&e.path)}")
+    check fs.remove("hsy-fs-bytes", recursive=True)
+
+manual fn main():
+    try:
+        check run()
+    except IoError as e:
+        print(f"unexpected: {e.path}: {e.reason}")
+# expect: 70000 True
+# expect: [0, 1, 2, 3, 4] 0
+# expect: 5 0
+# expect: read | larger than the limit of 4 bytes | refused | refused
+# expect: 5 False
+# expect: 5 True True True True
+# expect: missing nothing.bin
