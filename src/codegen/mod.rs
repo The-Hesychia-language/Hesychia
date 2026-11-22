@@ -168,6 +168,10 @@ int hsy_stat(const char* path, int follow, int64_t* out) {
 }
 #else
 #include <fcntl.h>
+#include <unistd.h>
+#if defined(__linux__)
+#include <sys/syscall.h>
+#endif
 static void hsy_stat_common(const struct stat* st, int64_t* out) {
     out[0] = (int64_t)st->st_size;
     out[1] = S_ISLNK(st->st_mode) ? 3 : S_ISDIR(st->st_mode) ? 2 : 1;
@@ -187,7 +191,7 @@ static void hsy_stat_common(const struct stat* st, int64_t* out) {
 }
 #if defined(__linux__)
 /* Linux's statx, which also gives the creation where the file system records it. Its
-   layout is fixed by the kernel; declared here as glibc only shows it with _GNU_SOURCE. */
+   layout is fixed by the kernel. Called through syscall(): the C library may not have it. */
 struct hsy_statx_time { int64_t tv_sec; uint32_t tv_nsec; int32_t reserved; };
 struct hsy_statx {
     uint32_t mask, blksize; uint64_t attributes; uint32_t nlink, uid, gid; uint16_t mode, pad;
@@ -195,13 +199,12 @@ struct hsy_statx {
     struct hsy_statx_time atime, btime, ctime, mtime;
     uint32_t rdev_major, rdev_minor, dev_major, dev_minor; uint64_t spare[14];
 };
-int statx(int dir, const char* path, int flags, unsigned int mask, struct hsy_statx* out);
 #endif
 int hsy_stat(const char* path, int follow, int64_t* out) {
-#if defined(__linux__)
+#if defined(__linux__) && defined(SYS_statx)
     struct hsy_statx sx;
     /* STATX_BASIC_STATS | STATX_BTIME. */
-    if (statx(AT_FDCWD, path, follow ? 0 : AT_SYMLINK_NOFOLLOW, 0xfffu, &sx) == 0) {
+    if (syscall(SYS_statx, AT_FDCWD, path, follow ? 0 : AT_SYMLINK_NOFOLLOW, 0xfffu, &sx) == 0) {
         out[0] = (int64_t)sx.size;
         out[1] = S_ISLNK(sx.mode) ? 3 : S_ISDIR(sx.mode) ? 2 : 1;
         out[2] = sx.mtime.tv_sec; out[3] = sx.mtime.tv_nsec;
@@ -221,9 +224,17 @@ int hsy_stat(const char* path, int follow, int64_t* out) {
 }
 #endif
 
-/* For `fs.write_bytes`: a file created for writing only if it does not exist yet, readable by
-   its owner alone until it is given its final permissions; NULL with `errno` set. */
-FILE* hsy_create_new(const char* path);
+/* A file created for writing only if nothing is at `path` yet, not even a link: for
+   `fs.Mode.Create`, and the temporary files of `fs.write_bytes`, which are `private` (readable
+   by their owner alone) until given their final permissions. NULL with `errno` set. */
+FILE* hsy_create_new(const char* path, int private_file);
+/* Whether the last error was a name already taken (EEXIST), read before anything else can
+   change `errno`: a second look at the path could find it gone by then. */
+int hsy_error_is_taken(void);
+int hsy_error_is_taken(void) { return errno == EEXIST; }
+/* Moves `from` to `to` only if nothing is at `to`, at once: 0 when moved, 1 when `to` is
+   taken, 2 when the system or the file system cannot do it, -1 with `errno` set. */
+int hsy_move_new(const char* from, const char* to);
 /* Writes a file's buffers to the disk itself; 0 when it worked. */
 int hsy_sync(FILE* f);
 /* Gives `path` the permissions of `like`, or the default ones of a new file when `like`
@@ -252,7 +263,8 @@ static int hsy_move_file(const char* from, const char* to, unsigned long flags) 
     }
     return -1;
 }
-FILE* hsy_create_new(const char* path) {
+FILE* hsy_create_new(const char* path, int private_file) {
+    (void)private_file;
     int fd = _open(path, _O_CREAT | _O_EXCL | _O_WRONLY | _O_BINARY, _S_IREAD | _S_IWRITE);
     if (fd < 0) return NULL;
     FILE* f = _fdopen(fd, \"wb\");
@@ -265,14 +277,21 @@ int hsy_copy_mode(const char* path, const char* like) { (void)path; (void)like; 
    `rename` refuses a `to` that exists, where Unix's replaces it. */
 int hsy_replace(const char* from, const char* to) { return hsy_move_file(from, to, 0x1 | 0x8); }
 int hsy_rename(const char* from, const char* to) { return hsy_move_file(from, to, 0x1 | 0x2); }
+int hsy_move_new(const char* from, const char* to) {
+    /* MOVEFILE_WRITE_THROUGH alone: without MOVEFILE_REPLACE_EXISTING, a `to` that exists
+       is refused, at once, on NTFS. */
+    if (hsy_move_file(from, to, 0x8) == 0) return 0;
+    return errno == EEXIST ? 1 : -1;
+}
 uint8_t* hsy_real_path(const char* path) {
     if (_access(path, 0) != 0) return NULL;
     return (uint8_t*)_fullpath(NULL, path, 0);
 }
 #else
 #include <unistd.h>
-FILE* hsy_create_new(const char* path) {
-    int fd = open(path, O_CREAT | O_EXCL | O_WRONLY, 0600);
+FILE* hsy_create_new(const char* path, int private_file) {
+    /* O_EXCL: a link already at `path` is refused, never followed. */
+    int fd = open(path, O_CREAT | O_EXCL | O_WRONLY, private_file ? 0600 : 0666);
     if (fd < 0) return NULL;
     FILE* f = fdopen(fd, \"wb\");
     if (!f) close(fd);
@@ -288,6 +307,28 @@ int hsy_copy_mode(const char* path, const char* like) {
 }
 int hsy_replace(const char* from, const char* to) { return rename(from, to); }
 int hsy_rename(const char* from, const char* to) { return rename(from, to); }
+#if defined(__APPLE__)
+int renamex_np(const char* from, const char* to, unsigned int flags);
+#endif
+int hsy_move_new(const char* from, const char* to) {
+#if defined(__linux__) && defined(SYS_renameat2)
+    /* RENAME_NOREPLACE; through syscall(), as glibc has renameat2 only since 2.28. */
+    if (syscall(SYS_renameat2, AT_FDCWD, from, AT_FDCWD, to, 1u) == 0) return 0;
+    if (errno == EEXIST) return 1;
+    /* An older kernel, or a file system without it. */
+    if (errno == ENOSYS || errno == EINVAL || errno == EPERM) return 2;
+    return -1;
+#elif defined(__APPLE__)
+    /* RENAME_EXCL, since macOS 10.12. */
+    if (renamex_np(from, to, 0x4u) == 0) return 0;
+    if (errno == EEXIST) return 1;
+    if (errno == ENOTSUP || errno == EINVAL || errno == ENOSYS) return 2;
+    return -1;
+#else
+    (void)from; (void)to;
+    return 2;
+#endif
+}
 uint8_t* hsy_real_path(const char* path) { return (uint8_t*)realpath(path, NULL); }
 #endif
 

@@ -39,7 +39,11 @@ priv extern fn c_free(memory: ptr[u8])
 @symbol("hsy_stat")
 priv extern fn c_stat(path: ptr[u8], follow: i32, out: ptr[i64]) -> i32
 @symbol("hsy_create_new")
-priv extern fn create_new(path: ptr[u8]) -> Optional[ptr[u8]]
+priv extern fn create_new(path: ptr[u8], private_file: i32) -> Optional[ptr[u8]]
+@symbol("hsy_error_is_taken")
+priv extern fn error_is_taken() -> i32
+@symbol("hsy_move_new")
+priv extern fn move_new(old: ptr[u8], new: ptr[u8]) -> i32
 @symbol("hsy_sync")
 priv extern fn sync(stream: ptr[u8]) -> i32
 @symbol("hsy_copy_mode")
@@ -58,11 +62,13 @@ manual enum Kind:
 priv manual fn failure(path: &str) -> IoError:
     return IoError(path=f"{path}", reason=str.from_c(error_text()))
 
-# How `open` opens a file: to read, to write from empty, or to add at the end.
+# How `open` opens a file: to read, to write from empty, to add at the end, or to write a
+# new file, refused if anything is already at its path, a link included.
 manual enum Mode:
     Read
     Write
     Append
+    Create
 
 # Text is written with `print(..., to=f)` and read with `io.read(f)`.
 manual fn open(path: &str, mode: Mode = Mode.Read) -> File raises IoError:
@@ -75,6 +81,13 @@ manual fn open(path: &str, mode: Mode = Mode.Read) -> File raises IoError:
             flags = "wb"
         case Mode.Append:
             flags = "ab"
+        case Mode.Create:
+            # Taken in one step by the system: no other program can come between a test of
+            # the path and the file's creation.
+            const created: Optional[ptr[u8]] = create_new(path.to_c(), 0)
+            if created is None:
+                raise failure(path)
+            return from_handle(created, path)
     const handle: Optional[ptr[u8]] = c_fopen(path.to_c(), flags.to_c())
     if handle is None:
         raise failure(path)
@@ -341,31 +354,90 @@ manual fn write_bytes(path: &str, bytes: &vector[u8], atomic: bool = True) raise
         check write_stream(handle, path, bytes, False)
         return
     const target: str = write_target(path)
-    const folder: str = parent(&target)
-    const base: str = name(&target)
+    const temporary: str = check write_temporary(path, &target, bytes)
+    if copy_mode(temporary.to_c(), target.to_c()) != 0 or replace(temporary.to_c(), target.to_c()) != 0:
+        const reason: IoError = failure(path)
+        remove_quietly(&temporary)
+        raise reason
+
+# Writes `bytes` to a new hidden file beside `target`, to the disk, and gives its path. The
+# errors name `path`, which the caller gave.
+priv manual fn write_temporary(path: &str, target: &str, bytes: &vector[u8]) -> str raises IoError:
+    const folder: str = parent(target)
+    const base: str = name(target)
     # A name nobody else uses, created only if it does not exist yet.
     mut attempt: i64 = 0
     while True:
         const hidden: str = f".{base}.{attempt}.tmp"
         const temporary: str = join(&folder, &hidden)
-        const handle: Optional[ptr[u8]] = create_new(temporary.to_c())
+        const handle: Optional[ptr[u8]] = create_new(temporary.to_c(), 1)
         if handle is not None:
             try:
                 check write_stream(handle, &temporary, bytes, True)
             except IoError as e:
                 remove_quietly(&temporary)
                 raise IoError(path=f"{path}", reason=e.reason.copy())
-            if copy_mode(temporary.to_c(), target.to_c()) != 0 or replace(temporary.to_c(), target.to_c()) != 0:
+            return temporary
+        # Only a name already taken (by another write, or one that stopped halfway) is worth
+        # another try. The error says so itself: looking at the name again could find it
+        # gone, the other write having moved its file meanwhile.
+        const taken: bool = error_is_taken() != 0
+        const refusal: IoError = failure(path)
+        if attempt >= 999 or not taken:
+            raise refusal
+        attempt += 1
+
+# The `attempt`th name tried by `write_unique`: `path` itself, then `stem_1.ext`...
+priv manual fn numbered(path: &str, attempt: i64) -> str:
+    if attempt == 0:
+        return f"{path}"
+    const (start, end): (size, size) = last_name(path)
+    const whole: str = bytes_between(path, start, end)
+    const plain: str = stem(&whole)
+    const ext: str = bytes_between(&whole, byte_len(plain), byte_len(whole))
+    return bytes_between(path, 0, start) + f"{plain}_{attempt}{ext}"
+
+# Writes `bytes` to a new file at `path`, or at `stem_1.ext`, `stem_2.ext`... when the name is
+# taken, and gives the path written: `fs.write_unique("data/photo.jpg", &body)` may give
+# "data/photo_1.jpg". A file or a link already there is never overwritten nor followed.
+#
+# As `write_bytes`, the bytes go to a hidden file first, then moved to the free name in one
+# step, so a file is never seen half written; where the system cannot move without replacing
+# (Linux before 3.15, some file systems), the name is taken by an empty file first.
+# After 10,000 names taken, `IoError`.
+manual fn write_unique(path: &str, bytes: &vector[u8]) -> str raises IoError:
+    const temporary: str = check write_temporary(path, path, bytes)
+    # The permissions of a new file, as `path` does not exist or is not ours to copy.
+    copy_mode(temporary.to_c(), "".to_c())
+    mut attempt: i64 = 0
+    while attempt < 10000:
+        const candidate: str = numbered(path, attempt)
+        const moved: i32 = move_new(temporary.to_c(), candidate.to_c())
+        if moved == 0:
+            return candidate
+        if moved == 2:
+            # The name is taken by an empty file of ours, which the move then replaces.
+            const placeholder: Optional[ptr[u8]] = create_new(candidate.to_c(), 1)
+            const taken: bool = error_is_taken() != 0
+            if placeholder is not None:
+                c_fclose(placeholder)
+                if replace(temporary.to_c(), candidate.to_c()) == 0:
+                    return candidate
+                const reason: IoError = failure(path)
+                remove_quietly(&candidate)
+                remove_quietly(&temporary)
+                raise reason
+            if not taken:
                 const reason: IoError = failure(path)
                 remove_quietly(&temporary)
                 raise reason
-            return
-        # Only a name already taken (by a write that stopped halfway) is worth another try.
-        # The reason is read first: testing the name changes it.
-        const refusal: IoError = failure(path)
-        if attempt >= 999 or not exists(&temporary):
-            raise refusal
+        elif moved != 1:
+            const reason: IoError = failure(path)
+            remove_quietly(&temporary)
+            raise reason
         attempt += 1
+    remove_quietly(&temporary)
+    raise IoError(path=f"{path}", reason="10,000 names already taken")
 
 # What the file system knows of a file. Dates are in seconds since 1970, as
 # `time.timestamp()` gives them, so `time.date(info.modified)` writes one.
