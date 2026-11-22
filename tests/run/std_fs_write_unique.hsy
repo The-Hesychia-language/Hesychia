@@ -1,0 +1,70 @@
+import fs
+import io
+from io import print, IoError, File
+
+manual fn text_bytes(text: &str) -> vector[u8]:
+    mut out: vector[u8] = []
+    for i in range(byte_len(text)):
+        out.push(text.byte(i))
+    return out
+
+manual fn content(path: &str) -> str:
+    try:
+        const bytes: vector[u8] = check fs.read_bytes(path)
+        const text: Optional[str] = str.from_bytes(&bytes)
+        if text is not None:
+            return text
+    except IoError as _e:
+        pass
+    return "?"
+
+manual fn save(path: &str, text: &str) -> str raises IoError:
+    const bytes: vector[u8] = text_bytes(text)
+    const written: str = check fs.write_unique(path, &bytes)
+    return fs.name(&written)
+
+manual fn run() raises IoError:
+    # Left by a run that stopped halfway.
+    if fs.exists("hsy-unique"):
+        check fs.remove("hsy-unique", recursive=True)
+    check fs.make_dir("hsy-unique")
+    # The name, then numbered names: none is overwritten.
+    print(f"{check save("hsy-unique/photo.jpg", "a")} {check save("hsy-unique/photo.jpg", "b")} {check save("hsy-unique/photo.jpg", "c")}")
+    print(f"{content("hsy-unique/photo.jpg")}{content("hsy-unique/photo_1.jpg")}{content("hsy-unique/photo_2.jpg")}")
+    # The number goes before the last extension; a name without one ends with it.
+    check save("hsy-unique/archive.tar.gz", "x")
+    check save("hsy-unique/.bashrc", "x")
+    check save("hsy-unique/README", "x")
+    print(f"{check save("hsy-unique/archive.tar.gz", "y")} {check save("hsy-unique/.bashrc", "y")} {check save("hsy-unique/README", "y")}")
+    # No hidden file is left behind.
+    mut left: size = 0
+    for p in check fs.list_dir("hsy-unique"):
+        if p.ends_with(".tmp"):
+            left += 1
+    print(f"{left}")
+    # Mode.Create: a new file, and a refusal for a name taken.
+    const f: File = check fs.open("hsy-unique/new.txt", fs.Mode.Create)
+    print("made", to=f)
+    io.close(f)
+    try:
+        check fs.open("hsy-unique/new.txt", fs.Mode.Create)
+        print("overwritten")
+    except IoError as _e:
+        print(f"kept {content("hsy-unique/new.txt").strip()}")
+    try:
+        check save("hsy-unique/missing/photo.jpg", "z")
+    except IoError as e:
+        print(f"refused {e.path}")
+    check fs.remove("hsy-unique", recursive=True)
+
+manual fn main():
+    try:
+        check run()
+    except IoError as e:
+        print(f"unexpected: {e.path}: {e.reason}")
+# expect: photo.jpg photo_1.jpg photo_2.jpg
+# expect: abc
+# expect: archive.tar_1.gz .bashrc_1 README_1
+# expect: 0
+# expect: kept made
+# expect: refused hsy-unique/missing/photo.jpg
