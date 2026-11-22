@@ -135,3 +135,29 @@ manual fn push_u16(out: &mut vector[u8], value: i64, order: Order) raises Binary
 manual fn push_u32(out: &mut vector[u8], value: i64, order: Order) raises BinaryError:
     for b in check encode(value, 4, order, len(out)):
         out.push(b)
+
+# `value` as its 8 bytes in `order`. No fit check: every `u64` is exactly 8 bytes. A separate
+# path from `encode`, which works in `i64` and cannot hold a 64-bit value or its range.
+priv manual fn encode_u64(value: u64, order: Order) -> vector[u8]:
+    const n: size = 8
+    mut out: vector[u8] = []
+    for i in range(n):
+        mut shift: size = i
+        if order == Order.Big:
+            shift = n - 1 - i
+        out.push(u8((value >> u64(8 * shift)) & u64(255)))
+    return out
+
+# Writes a full 64-bit `value`, an address for instance, over the 8 bytes at `at`.
+manual fn put_u64(data: &mut vector[u8], at: size, value: u64, order: Order) raises BinaryError:
+    const n: size = 8
+    check need(data, at, n)
+    const encoded: vector[u8] = encode_u64(value, order)
+    for i in range(n):
+        data[at + i] = encoded[i]
+
+# Adds a full 64-bit `value` at the end of `out`. Unlike `push_u16` / `push_u32` it never
+# raises: a `u64` always fits in its 8 bytes.
+manual fn push_u64(out: &mut vector[u8], value: u64, order: Order):
+    for b in encode_u64(value, order):
+        out.push(b)
