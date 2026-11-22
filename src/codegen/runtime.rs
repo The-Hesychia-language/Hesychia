@@ -722,6 +722,7 @@ int hsy_conn_failed(uint8_t* conn) { (void)conn; return 1; }
 int hsy_conn_write(uint8_t* conn, const uint8_t* data, size_t n) { (void)conn; (void)data; (void)n; return -1; }
 const uint8_t* hsy_conn_error(void) { return (const uint8_t*)""; }
 void hsy_conn_close(uint8_t* conn) { (void)conn; }
+void hsy_conn_shutdown(uint8_t* conn) { (void)conn; }
 
 "#;
 
@@ -1054,6 +1055,7 @@ int hsy_conn_getc(uint8_t* conn);
 size_t hsy_conn_read(uint8_t* out, size_t count, uint8_t* conn);
 int hsy_conn_failed(uint8_t* conn);
 void hsy_conn_close(uint8_t* conn);
+void hsy_conn_shutdown(uint8_t* conn);
 
 int hsy_conn_getc(uint8_t* conn) {
     hsy_conn* c = (hsy_conn*)conn;
@@ -1093,6 +1095,16 @@ void hsy_conn_close(uint8_t* conn) {
     hsy_conn* c = (hsy_conn*)conn;
     hsy_sock_close(c->sock);
     free(c);
+}
+
+/* Half-closes both directions, waking any blocked read on this connection. */
+void hsy_conn_shutdown(uint8_t* conn) {
+    hsy_conn* c = (hsy_conn*)conn;
+#ifdef _WIN32
+    shutdown(c->sock, SD_BOTH);
+#else
+    shutdown(c->sock, SHUT_RDWR);
+#endif
 }
 
 "#;
