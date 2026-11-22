@@ -11,7 +11,7 @@
 # The alphabet is the 26 lowercase letters, so a window is unique for up to 26^4 = 456976 bytes:
 # past that a pattern would repeat, which `pattern` refuses.
 
-from offsec.binary import Order, Width
+from binary import Order, Width
 
 # A pattern longer than the unique space: `requested` bytes asked for, `max` the most that stay
 # unique.

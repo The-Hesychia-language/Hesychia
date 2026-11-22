@@ -1,4 +1,5 @@
-# offsec.binary: numbers read from and written to bytes, for parsing binary formats.
+# binary: numbers read from and written to bytes (for parsing binary formats), and `fill` / `pad`
+# to build byte buffers.
 #
 #     width = binary.read_u16(data, 18, Order.Little)
 #     binary.put_u32(data, 4, length, Order.Big)
@@ -161,3 +162,17 @@ manual fn put_u64(data: &mut vector[u8], at: size, value: u64, order: Order) rai
 manual fn push_u64(out: &mut vector[u8], value: u64, order: Order):
     for b in encode_u64(value, order):
         out.push(b)
+
+# A run of `count` copies of `byte`, such as a fill or a NOP sled.
+manual fn fill(byte: u8, count: size) -> vector[u8]:
+    mut out: vector[u8] = []
+    for _ in range(count):
+        out.push(byte)
+    return out
+
+# `data` extended with `byte` up to `length`, or returned as it is when already that long.
+manual fn pad(owned data: vector[u8], length: size, byte: u8) -> vector[u8]:
+    mut out: vector[u8] = data
+    while len(out) < length:
+        out.push(byte)
+    return out
