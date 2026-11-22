@@ -1,0 +1,12 @@
+# A parameter changed before an error: the error is reported, not the change.
+managed struct Slot:
+    shown: str
+
+managed fn decode(slot: Slot, n: i64):
+    slot.shown = "x"
+    v = u16(n, 2)
+
+managed fn main():
+    s = Slot(shown="")
+    decode(s, 1)
+# error: `u16(...)` takes exactly one value

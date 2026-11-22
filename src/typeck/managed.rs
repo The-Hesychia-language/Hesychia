@@ -248,9 +248,11 @@ impl Checker<'_> {
         self.warnings.truncate(warnings);
         self.lambdas = lambdas;
         let probe = std::mem::take(&mut self.probe);
-        if result.is_err() {
+        if let Err(error) = result {
+            self.probe_errors.insert(index, error);
             return false;
         }
+        self.probe_errors.remove(&index);
         let mut changed = self.tables.fns[index].raises != raises;
         for (position, used, kept) in probe.vars.into_values() {
             if let Some(span) = kept {
