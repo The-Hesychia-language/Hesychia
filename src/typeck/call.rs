@@ -364,8 +364,14 @@ impl Checker<'_> {
     }
 
     pub(super) fn check_variadic_arg(&mut self, arg: &mut Expr) -> Result<()> {
+        // `None` is C's NULL, as at the end of `gtk_dialog_new_with_buttons(..., None)`.
+        if matches!(arg.kind, ExprKind::None) {
+            let null = Type::Optional(Box::new(Type::Ptr(Box::new(Type::Int(IntTy::U8)))));
+            return self.check_value(arg, &null);
+        }
         let ty = self.check_expr(arg, None)?;
-        if !(ty.is_numeric() || matches!(ty, Type::Bool | Type::Char | Type::Ptr(_)))
+        // A plain function is a C function pointer, as libcurl's CURLOPT_WRITEFUNCTION takes.
+        if !(ty.is_numeric() || matches!(ty, Type::Bool | Type::Char | Type::Ptr(_) | Type::Fn(..)))
             && !matches!(&ty, Type::Optional(inner) if matches!(**inner, Type::Ptr(_)))
         {
             return Err(Diagnostic::error(
