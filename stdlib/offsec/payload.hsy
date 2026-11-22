@@ -1,0 +1,62 @@
+# offsec.payload: build an exploit payload from mixed parts, and pad it.
+#
+#     p = payload.flat([
+#         Part.Bytes(cyclic.pattern(264)),
+#         Part.Address(0x401196),
+#         Part.Text("/bin/sh\0")
+#     ])
+#
+# A `Part` is raw bytes, a string's bytes, or an address packed for the target. `flat` joins
+# them into one `vector[u8]`. `fill` and `pad` make and extend runs of a byte (a NOP sled, or a
+# payload grown to a fixed size), on their own or inside a `Part.Bytes`.
+
+from offsec.binary import Order, Width, BinaryError, push_u32, push_u64
+
+# One piece of a payload.
+manual enum Part:
+    Bytes(data: vector[u8])   # the bytes as they are
+    Text(text: str)           # the string's UTF-8 bytes, as written (no null terminator added)
+    Address(value: u64)       # packed for the call's width and order
+
+# Appends `value` packed for `width` in `order`. A 64-bit address is 8 bytes and always fits; a
+# 32-bit one is 4 bytes, and raises `BinaryError` when `value` is too large for them.
+priv manual fn push_address(out: &mut vector[u8], value: u64, width: Width, order: Order) raises BinaryError:
+    if width == Width.Bits64:
+        push_u64(out, value, order)
+    else:
+        if value > u64(4294967295):
+            raise BinaryError(at=len(out), needed=4, length=0, reason=f"address {value} does not fit in 4 bytes")
+        check push_u32(out, i64(value), order)
+
+# Joins `parts` into one buffer. `width` and `order` pack every `Address`; they default to x86-64
+# (64-bit, little-endian) and are passed for a 32-bit or big-endian target. Raises `BinaryError`
+# only when a 32-bit `Address` does not fit 4 bytes.
+manual fn flat(owned parts: vector[Part], width: Width = Width.Bits64, order: Order = Order.Little) -> vector[u8] raises BinaryError:
+    mut out: vector[u8] = []
+    for part in parts:
+        match part:
+            case Part.Bytes(data):
+                for b in data:
+                    out.push(b)
+            case Part.Text(text):
+                mut i: size = 0
+                while i < byte_len(text):
+                    out.push(text.byte(i))
+                    i += 1
+            case Part.Address(value):
+                check push_address(&mut out, value, width, order)
+    return out
+
+# A run of `count` copies of `byte`, such as a NOP sled.
+manual fn fill(byte: u8, count: size) -> vector[u8]:
+    mut out: vector[u8] = []
+    for _ in range(count):
+        out.push(byte)
+    return out
+
+# `data` extended with `byte` up to `length`, or returned as it is when already that long.
+manual fn pad(owned data: vector[u8], length: size, byte: u8) -> vector[u8]:
+    mut out: vector[u8] = data
+    while len(out) < length:
+        out.push(byte)
+    return out
