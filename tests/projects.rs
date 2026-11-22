@@ -184,13 +184,16 @@ fn settings_link_c_libraries() {
     let run = Command::new(HSY).arg("run").current_dir(&app).env("LIBRARY_PATH", &libs).output();
     assert_eq!(stdout(&run.expect("hsy runs")), "42\n");
 
-    // `:file` names the library's file, as installed without its development files.
-    write(
-        &dir.join("greeting/hesychia.toml"),
-        &format!("{manifest}\n[settings]\nlinks = [\":libgreet.a\"]\n"),
-    );
-    let run = Command::new(HSY).arg("run").current_dir(&app).env("LIBRARY_PATH", &libs).output();
-    assert_eq!(stdout(&run.expect("hsy runs")), "42\n");
+    // `:file` names the library's file, as installed without its development files: GNU ld's
+    // form, which Apple's linker does not take.
+    if !cfg!(target_os = "macos") {
+        write(
+            &dir.join("greeting/hesychia.toml"),
+            &format!("{manifest}\n[settings]\nlinks = [\":libgreet.a\"]\n"),
+        );
+        let run = Command::new(HSY).arg("run").current_dir(&app).env("LIBRARY_PATH", &libs).output();
+        assert_eq!(stdout(&run.expect("hsy runs")), "42\n");
+    }
 
     // Without the library, the C compiler is told about it, and fails.
     let missing = hsy(&app, &["build"]);
