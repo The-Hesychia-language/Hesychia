@@ -2,10 +2,10 @@
 # saved return address or a controlled register.
 #
 #     payload = cyclic.pattern(300)              # send this; the program crashes
-#     pad = cyclic.offset(0x6161616161616166)    # the value left in RSP/RIP -> the offset
+#     pad = cyclic.offset_of(0x6161616161616166)    # the value left in RSP/RIP -> the offset
 #
 # Every 4-byte window of the pattern is unique, so the few bytes that land in a register pin the
-# exact spot. `pattern` is the bytes to send; `offset` is the padding length that reaches that
+# exact spot. `pattern` is the bytes to send; `offset_of` is the padding length that reaches that
 # spot, or `None` when the value is not a window of the pattern (wrong width, or not ours).
 #
 # The alphabet is the 26 lowercase letters, so a window is unique for up to 26^4 = 456976 bytes:
@@ -94,7 +94,7 @@ manual fn pattern(length: size) -> vector[u8] raises CyclicError:
 # or `None` when `value` is not a window of the pattern. `value` is what you read out of the
 # controlled register (or off the stack) after the crash. `width` defaults to 64-bit and `order`
 # to little-endian (x86); pass them for a 32-bit or big-endian target.
-manual fn offset(value: u64, width: Width = Width.Bits64, order: Order = Order.Little) -> Optional[size]:
+manual fn offset_of(value: u64, width: Width = Width.Bits64, order: Order = Order.Little) -> Optional[size]:
     const window: vector[u8] = window_of(value, width, order)
     mut seq: vector[u8] = []
     generate(&mut seq, unique_max())
