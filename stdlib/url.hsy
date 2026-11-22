@@ -22,6 +22,10 @@ manual struct Url:
     path: str
     query: dict[str, vector[str]]
     fragment: str
+    # The path as written, when encoding `path` again would not give it back: in
+    # "/files/a%2Fb", `path` is "/files/a/b", and the `%2F` is one name, not a folder.
+    # "" otherwise. `to_text` and `join` use it while `path` still decodes from it.
+    raw_path: str
 
 # --- characters -------------------------------------------------------------------------
 
@@ -113,6 +117,36 @@ priv manual fn decoded(text: &str, start: size, end: size, plus: bool) -> str:
         return between(text, start, end)
     return made
 
+# The path of `u` as it is written in a URL.
+priv manual fn path_text(u: &Url) -> str:
+    if byte_len(u.raw_path) > 0 and decoded(&u.raw_path, 0, byte_len(u.raw_path), False) == u.path:
+        return u.raw_path.copy()
+    return encoded(&u.path, "/!$&'()*+,;=:@")
+
+# Whether a path is written as a URL writes it: plain bytes, those a path keeps, and `%XX`.
+priv manual fn well_encoded(raw: &str) -> bool:
+    const n: size = byte_len(raw)
+    mut i: size = 0
+    while i < n:
+        const b: u8 = raw.byte(i)
+        if b == 37:
+            if i + 2 >= n or hex_value(raw.byte(i + 1)) is None or hex_value(raw.byte(i + 2)) is None:
+                return False
+            i += 3
+        elif is_plain(b) or among(b, "/!$&'()*+,;=:@"):
+            i += 1
+        else:
+            return False
+    return True
+
+# Sets the path of `u` from how it is written, `raw`.
+priv manual fn set_path(u: &mut Url, raw: &str):
+    u.path = decoded(raw, 0, byte_len(raw), False)
+    if not well_encoded(raw) or encoded(&u.path, "/!$&'()*+,;=:@") == raw:
+        u.raw_path = ""
+    else:
+        u.raw_path = raw.copy()
+
 # --- encode and decode ---------------------------------------------------------------------
 
 # `text` made safe to put in a URL: every character but letters, digits and `-._~` becomes
@@ -188,7 +222,7 @@ priv manual fn read_authority(text: &str, first: size, last: size, u: &mut Url) 
 
 # The parts of the URL written in `text`.
 manual fn parse(text: &str) -> Url raises UrlError:
-    mut u: Url = Url(scheme="", user="", host="", port=None, path="", query=dict[str, vector[str]](), fragment="")
+    mut u: Url = Url(scheme="", user="", host="", port=None, path="", query=dict[str, vector[str]](), fragment="", raw_path="")
     const n: size = byte_len(text)
     mut at: size = 0
     const scheme: size = scheme_len(text)
@@ -201,7 +235,8 @@ manual fn parse(text: &str) -> Url raises UrlError:
         const end: size = position(text, 47, at + 2, query_at)
         check read_authority(text, at + 2, end, &mut u)
         at = end
-    u.path = decoded(text, at, query_at, False)
+    const raw: str = between(text, at, query_at)
+    set_path(&mut u, &raw)
     if query_at < fragment_at:
         read_query(text, query_at + 1, fragment_at, &mut u.query)
     if fragment_at < n:
@@ -227,7 +262,7 @@ manual fn to_text(u: &Url) -> str:
             out += encoded(&u.host, "")
         if u.port is not None:
             out += f":{u.port}"
-    out += encoded(&u.path, "/!$&'()*+,;=:@")
+    out += path_text(u)
     mut first: bool = True
     for name, values in u.query.items():
         for value in &values:
@@ -273,30 +308,37 @@ priv manual fn without_dots(path: &str) -> str:
 # "https://example.com/d", and a whole URL to itself.
 manual fn join(base: &Url, link: &str) -> Url raises UrlError:
     mut to: Url = check parse(link)
+    # Paths are joined as they are written: an encoded `/` (`%2F`) is not a separator.
+    mut raw: str = path_text(&to)
     if len(to.scheme) > 0:
-        to.path = without_dots(&to.path)
+        const clean: str = without_dots(&raw)
+        set_path(&mut to, &clean)
         return to
     to.scheme = base.scheme.copy()
     if len(to.host) > 0:
-        to.path = without_dots(&to.path)
+        const clean: str = without_dots(&raw)
+        set_path(&mut to, &clean)
         return to
     to.user = base.user.copy()
     to.host = base.host.copy()
     to.port = base.port
-    if len(to.path) == 0:
+    if len(raw) == 0:
         to.path = base.path.copy()
+        to.raw_path = base.raw_path.copy()
         if len(to.query) == 0:
             to.query = base.query.copy()
         return to
-    if not to.path.starts_with("/"):
+    if not raw.starts_with("/"):
         # The link starts from the folder of the base's path.
+        const base_raw: str = path_text(base)
         mut folder: size = 0
-        for i in range(byte_len(base.path)):
-            if base.path.byte(i) == 47:
+        for i in range(byte_len(base_raw)):
+            if base_raw.byte(i) == 47:
                 folder = i + 1
         if folder == 0 and len(base.host) > 0:
-            to.path = "/" + to.path
+            raw = "/" + raw
         else:
-            to.path = between(&base.path, 0, folder) + to.path
-    to.path = without_dots(&to.path)
+            raw = between(&base_raw, 0, folder) + raw
+    const clean: str = without_dots(&raw)
+    set_path(&mut to, &clean)
     return to
