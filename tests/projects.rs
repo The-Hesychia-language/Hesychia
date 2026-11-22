@@ -152,3 +152,53 @@ fn settings_name_the_targets() {
     let one = hsy(&app, &["build", "-o", "app"]);
     assert!(String::from_utf8_lossy(&one.stderr).contains("several targets"));
 }
+
+#[test]
+fn settings_link_c_libraries() {
+    let dir = workspace("links");
+    // A C library of our own, `libgreet.a`, found by the C compiler through `LIBRARY_PATH`.
+    let libs = dir.join("libs");
+    write(&libs.join("greet.c"), "int greet_twice(int x) { return 2 * x; }\n");
+    let cc = |args: &[&str]| Command::new("cc").args(args).current_dir(&libs).status().expect("cc runs");
+    assert!(cc(&["-c", "greet.c", "-o", "greet.o"]).success());
+    let ar = Command::new("ar").args(["rcs", "libgreet.a", "greet.o"]).current_dir(&libs).status();
+    assert!(ar.expect("ar runs").success());
+
+    // The library declares the C function and names the C library; the app only imports it.
+    library(
+        &dir.join("greeting"),
+        "greeting",
+        "extern fn greet_twice(x: i32) -> i32\n\nmanual fn twice(x: i32) -> i32:\n    return greet_twice(x)\n",
+    );
+    let manifest = fs::read_to_string(dir.join("greeting/hesychia.toml")).expect("manifest");
+    write(&dir.join("greeting/hesychia.toml"), &format!("{manifest}\n[settings]\nlinks = [\"greet\"]\n"));
+    let app = dir.join("app");
+    write(
+        &app.join("hesychia.toml"),
+        "[project]\nname = \"app\"\n\n[dependencies]\ngreeting = { path = \"../greeting\" }\n",
+    );
+    write(
+        &app.join("src/main.hsy"),
+        "from io import print\nimport greeting\n\nmanaged fn main():\n    print(f\"{greeting.twice(21)}\")\n",
+    );
+    let run = Command::new(HSY).arg("run").current_dir(&app).env("LIBRARY_PATH", &libs).output();
+    assert_eq!(stdout(&run.expect("hsy runs")), "42\n");
+
+    // `:file` names the library's file, as installed without its development files.
+    write(
+        &dir.join("greeting/hesychia.toml"),
+        &format!("{manifest}\n[settings]\nlinks = [\":libgreet.a\"]\n"),
+    );
+    let run = Command::new(HSY).arg("run").current_dir(&app).env("LIBRARY_PATH", &libs).output();
+    assert_eq!(stdout(&run.expect("hsy runs")), "42\n");
+
+    // Without the library, the C compiler is told about it, and fails.
+    let missing = hsy(&app, &["build"]);
+    assert!(!missing.status.success());
+    assert!(String::from_utf8_lossy(&missing.stderr).contains("failed on the generated code"));
+
+    // A flag or a path is not a library name.
+    write(&app.join("hesychia.toml"), "[project]\nname = \"app\"\n\n[settings]\nlinks = [\"-Wl,--evil\"]\n");
+    let refused = hsy(&app, &["build"]);
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("`links` is a list of C library names"));
+}

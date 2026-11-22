@@ -149,7 +149,8 @@ pub fn build(input: &Input, options: &BuildOptions, build: &Build) -> Result<Pat
     let intel = c_code.contains("__asm__ volatile");
     let threads = c_code.contains("#include <pthread.h>");
     let net = c_code.contains("#include <winsock2.h>");
-    let flags = CFlags { release: options.release, intel_asm: intel, threads, net };
+    let flags =
+        CFlags { release: options.release, intel_asm: intel, threads, net, links: &input.project.links };
     let result = run_c_compiler(&compiler, build.platform, &c_path, &output, &flags);
     if !options.emit_c {
         let _ = fs::remove_file(&c_path);
@@ -190,13 +191,15 @@ fn compile_to_c(input: &Input, options: &BuildOptions, platform: &Platform) -> R
     Ok(codegen::generate(&program, &checked, &codegen::Options { debug, file_names, test: options.test.clone() }))
 }
 
-struct CFlags {
+struct CFlags<'a> {
     release: bool,
     /// `asm` bodies are written in Intel syntax.
     intel_asm: bool,
     threads: bool,
     /// Sockets are used: on Windows they are in their own library.
     net: bool,
+    /// `[settings] links`, after the code that uses them.
+    links: &'a [String],
 }
 
 fn run_c_compiler(
@@ -204,7 +207,7 @@ fn run_c_compiler(
     platform: &Platform,
     c_path: &Path,
     output: &Path,
-    flags: &CFlags,
+    flags: &CFlags<'_>,
 ) -> Result<(), String> {
     let status = Command::new(compiler)
         .args(["-std=c11", "-o"])
@@ -214,6 +217,7 @@ fn run_c_compiler(
         .args(flags.intel_asm.then_some("-masm=intel"))
         .args(flags.threads.then_some("-pthread"))
         .args((flags.net && platform.os == "windows").then_some("-lws2_32"))
+        .args(flags.links.iter().map(|name| format!("-l{name}")))
         .arg("-lm")
         .status()
         .map_err(|e| format!("cannot run the C compiler `{compiler}` for {platform}: {e}"))?;

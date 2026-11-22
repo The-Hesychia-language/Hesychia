@@ -43,7 +43,7 @@ Milestones 1 to 6: the `manual` level with structs, enums, ownership, strings, v
 | Traits with default methods; `Equal`, `Add`/`Sub`/`Mul`/`Div`/`Mod`, `Drop`; generated `==` | |
 | Generic functions `fn f[T: A + B]`, structs `struct Pair[T]` and enums `enum Result[T, E]`, type arguments inferred or written, specialized per use | |
 | `fn(A) -> R` values, lambdas, nested functions; captures by `&` / `&mut` only, by design: a lambda never owns what it captures; passed as `&fn(...)` | |
-| `extern fn`, including variadic C functions, and `@symbol("sqrt")` above one to give it a name of its own; `Optional[ptr[T]]` maps to `NULL`; a `manual` function passes as a C callback (`qsort(..., compare)`); pointers in `manual`, unchecked: `ptr(&x)`, `p[i]`, `p + n`, `p2 - p1`, `ptr[U](p)`, `p.volatile_read()`, `p.volatile_write(x)` | |
+| `extern fn`, including variadic C functions, from C libraries named by `[settings] links`, and `@symbol("sqrt")` above one to give it a name of its own; `Optional[ptr[T]]` maps to `NULL`; a `manual` function passes as a C callback (`qsort(..., compare)`); pointers in `manual`, unchecked: `ptr(&x)`, `p[i]`, `p + n`, `p2 - p1`, `ptr[U](p)`, `p.volatile_read()`, `p.volatile_write(x)` | |
 | `@packed` and `@align(N)` on `manual` structs; `@panic_handler` on one `manual fn name(message: &str)`, called before the program stops on a fault or a `panic` | |
 | `asm(in("reg") x, out("reg") y, inout("reg") z, clobber("reg")):` with lines of Intel assembly, in `manual`; each operand is bound to its register (`-masm=intel` is passed to the C compiler) | |
 | `SIMD[T, N]` (gcc and clang vector extensions): `SIMD[f32, 4](1.0, 2.0, 3.0, 4.0)`, or one value for every lane; `+ - * /`, and `& \| ^` on integer lanes, act lane by lane; `v[i]` reads and writes a lane | |
@@ -349,9 +349,10 @@ text = { git = "https://example.com/text.git", tag = "v1.0" }   # or branch = ".
 [settings]
 heap_threshold = 65536   # managed variables larger than this, in bytes, live on the heap
 targets = ["x86_64-linux-gnu", "x86_64-windows-gnu"]   # what `hsy build` builds for (default: the host)
+links = ["curl", "z"]   # C libraries the binary is linked with: `-lcurl -lz`
 ```
 
-A dependency is a project too: `import math` reads its `src/lib.hsy`, `import math.ops` its `src/ops.hsy`, and its own imports resolve inside it. A name is looked up in the project, then its dependencies, then the standard library; a name found in two of these places is an error. Git dependencies are cloned into `.hesychia/deps/`, and the commit each one was built from is written to `hesychia.lock`, which later builds follow even when the tag moves. Everything is compiled from source into one binary. With `targets`, `hsy build` makes one binary for each; `hsy run` always builds for this machine. When a value cannot be used again because a `managed` function now keeps it (say, after a dependency changed), the error names the function and the line where it keeps the value.
+A dependency is a project too: `import math` reads its `src/lib.hsy`, `import math.ops` its `src/ops.hsy`, and its own imports resolve inside it. A name is looked up in the project, then its dependencies, then the standard library; a name found in two of these places is an error. Git dependencies are cloned into `.hesychia/deps/`, and the commit each one was built from is written to `hesychia.lock`, which later builds follow even when the tag moves. Everything is compiled from source into one binary. With `targets`, `hsy build` makes one binary for each; `hsy run` always builds for this machine. `links` makes the C functions of a library reachable through `extern fn`: each name is given to the C compiler as `-l<name>`, so `"gtk-3"` is `libgtk-3`, found where the C compiler looks (`LIBRARY_PATH` adds folders); `":libcurl.so.4"` names the file itself, as GNU ld takes it, for a library installed without its development files. A dependency's `links` go to every binary that uses it. When a value cannot be used again because a `managed` function now keeps it (say, after a dependency changed), the error names the function and the line where it keeps the value.
 
 ## Example
 
