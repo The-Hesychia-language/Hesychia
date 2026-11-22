@@ -1,0 +1,130 @@
+# offsec.binary: numbers read from and written to bytes, for parsing binary formats.
+#
+#     width = binary.read_u16(data, 18, Order.Little)
+#     binary.put_u32(data, 4, length, Order.Big)
+#
+# Indexing past the end of a vector stops a program, and nothing can catch it. Every read and
+# write here checks first, and raises `BinaryError` instead: a cut or malicious file is an
+# error the parser handles, not a crash. Numbers come back as `i64`, which holds every value
+# up to 32 bits, so they can be added without overflowing a `u8`.
+
+# The order of a number's bytes. `Big`: the most significant byte first, as we write numbers
+# (0x1234 is stored 12 34: PNG, JPEG, network protocols). `Little`: the least significant
+# first (34 12: BMP, GIF, x86). TIFF says which in its first two bytes, "MM" or "II".
+manual enum Order:
+    Big
+    Little
+
+# A read or write that does not fit: `needed` bytes from `at`, in data of `length` bytes; or a
+# value too large for its field.
+manual struct BinaryError:
+    at: size
+    needed: size
+    length: size
+    reason: str
+
+# Raises `BinaryError` unless `count` bytes from `at` are in `data`.
+manual fn need(data: &vector[u8], at: size, count: size) raises BinaryError:
+    if at > len(data) or count > len(data) - at:
+        raise BinaryError(at=at, needed=count, length=len(data), reason=f"{count} bytes at {at} go past the end of {len(data)} bytes")
+
+# `count` bytes from `at` as one unsigned number.
+priv manual fn read_unsigned(data: &vector[u8], at: size, count: size, order: Order) -> u64 raises BinaryError:
+    check need(data, at, count)
+    mut value: u64 = 0
+    for i in range(count):
+        mut k: size = i
+        if order == Order.Little:
+            k = count - 1 - i
+        value = (value << 8) | u64(data[at + k])
+    return value
+
+manual fn read_u8(data: &vector[u8], at: size) -> i64 raises BinaryError:
+    check need(data, at, 1)
+    return i64(data[at])
+
+manual fn read_u16(data: &vector[u8], at: size, order: Order) -> i64 raises BinaryError:
+    return i64(check read_unsigned(data, at, 2, order))
+
+manual fn read_u32(data: &vector[u8], at: size, order: Order) -> i64 raises BinaryError:
+    return i64(check read_unsigned(data, at, 4, order))
+
+manual fn read_u64(data: &vector[u8], at: size, order: Order) -> u64 raises BinaryError:
+    return check read_unsigned(data, at, 8, order)
+
+manual fn read_i16(data: &vector[u8], at: size, order: Order) -> i64 raises BinaryError:
+    const value: i64 = check read_u16(data, at, order)
+    if value >= 32768:
+        return value - 65536
+    return value
+
+manual fn read_i32(data: &vector[u8], at: size, order: Order) -> i64 raises BinaryError:
+    const value: i64 = check read_u32(data, at, order)
+    if value >= 2147483648:
+        return value - 4294967296
+    return value
+
+# A copy of the bytes from `start` to `end`.
+manual fn slice(data: &vector[u8], start: size, end: size) -> vector[u8] raises BinaryError:
+    if end < start:
+        raise BinaryError(at=start, needed=0, length=len(data), reason=f"the slice ends at {end}, before its start {start}")
+    check need(data, start, end - start)
+    mut out: vector[u8] = []
+    for i in range(start, end):
+        out.push(data[i])
+    return out
+
+# Whether the bytes at `at` are those of `text`: `starts(data, 0, "GIF89a")`. False when they
+# would go past the end.
+manual fn starts(data: &vector[u8], at: size, text: &str) -> bool:
+    if at > len(data) or byte_len(text) > len(data) - at:
+        return False
+    for i in range(byte_len(text)):
+        if data[at + i] != text.byte(i):
+            return False
+    return True
+
+# The first position of `value` from `start`, before `end` and the end of `data`; `end` when
+# it is not there.
+manual fn find(data: &vector[u8], value: u8, start: size, end: size) -> size:
+    mut i: size = start
+    while i < end and i < len(data):
+        if data[i] == value:
+            return i
+        i += 1
+    return end
+
+# `value` as `count` bytes in `order`, checked to fit.
+priv manual fn encode(value: i64, count: size, order: Order, at: size) -> vector[u8] raises BinaryError:
+    const top: i64 = (i64(1) << i64(8 * count)) - 1
+    if value < 0 or value > top:
+        raise BinaryError(at=at, needed=count, length=0, reason=f"{value} does not fit in {count} bytes (0 to {top})")
+    mut out: vector[u8] = []
+    for i in range(count):
+        mut shift: size = i
+        if order == Order.Big:
+            shift = count - 1 - i
+        out.push(u8((value >> i64(8 * shift)) & 255))
+    return out
+
+priv manual fn put(data: &mut vector[u8], at: size, value: i64, count: size, order: Order) raises BinaryError:
+    check need(data, at, count)
+    const encoded: vector[u8] = check encode(value, count, order, at)
+    for i in range(count):
+        data[at + i] = encoded[i]
+
+# Writes `value` over the bytes at `at`.
+manual fn put_u16(data: &mut vector[u8], at: size, value: i64, order: Order) raises BinaryError:
+    check put(data, at, value, 2, order)
+
+manual fn put_u32(data: &mut vector[u8], at: size, value: i64, order: Order) raises BinaryError:
+    check put(data, at, value, 4, order)
+
+# Adds `value` at the end of `out`, as when a chunk is built.
+manual fn push_u16(out: &mut vector[u8], value: i64, order: Order) raises BinaryError:
+    for b in check encode(value, 2, order, len(out)):
+        out.push(b)
+
+manual fn push_u32(out: &mut vector[u8], value: i64, order: Order) raises BinaryError:
+    for b in check encode(value, 4, order, len(out)):
+        out.push(b)

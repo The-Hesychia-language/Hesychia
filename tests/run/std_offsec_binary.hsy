@@ -1,0 +1,62 @@
+import offsec.binary
+from io import print
+from offsec.binary import Order, BinaryError
+
+manual fn bytes_of(numbers: &vector[i64]) -> vector[u8]:
+    mut out: vector[u8] = []
+    for n in numbers:
+        out.push(u8(n))
+    return out
+
+manual fn refused(data: &vector[u8], at: size) -> str:
+    try:
+        check binary.read_u32(data, at, Order.Big)
+    except BinaryError as e:
+        return f"{e.at} {e.needed} {e.length}"
+    return "read"
+
+manual fn run() raises BinaryError:
+    const numbers: vector[i64] = [18, 52, 255, 254, 128, 0, 0, 1, 71, 73, 70]
+    const data: vector[u8] = bytes_of(&numbers)
+    print(f"{check binary.read_u16(&data, 0, Order.Big):x} {check binary.read_u16(&data, 0, Order.Little):x}")
+    print(f"{check binary.read_i16(&data, 2, Order.Big)} {check binary.read_i32(&data, 4, Order.Big)} {check binary.read_u32(&data, 4, Order.Big)}")
+    print(f"{check binary.read_u8(&data, 2) + check binary.read_u8(&data, 3)} {check binary.read_u64(&data, 0, Order.Little):x}")
+    # Past the end, raised and caught: where, how many, of how many.
+    print(f"{refused(&data, 8)} | {refused(&data, 99)} | {refused(&data, 7)}")
+    print(f"{binary.starts(&data, 8, "GIF")} {binary.starts(&data, 9, "GIF")} {binary.find(&data, 71, 0, len(data))} {binary.find(&data, 99, 2, 5)}")
+    const part: vector[u8] = check binary.slice(&data, 8, 11)
+    print(f"{part}")
+    try:
+        check binary.slice(&data, 5, 2)
+    except BinaryError as e:
+        print(e.reason)
+
+    mut out: vector[u8] = []
+    check binary.push_u16(&mut out, 4660, Order.Big)
+    check binary.push_u32(&mut out, 1, Order.Little)
+    check binary.put_u16(&mut out, 4, 65535, Order.Little)
+    print(f"{out}")
+    try:
+        check binary.push_u16(&mut out, 65536, Order.Big)
+    except BinaryError as e:
+        print(e.reason)
+    try:
+        check binary.put_u32(&mut out, 4, 1, Order.Big)
+    except BinaryError as e:
+        print(e.reason)
+
+manual fn main():
+    try:
+        check run()
+    except BinaryError as e:
+        print(f"unexpected: {e.reason}")
+# expect: 1234 3412
+# expect: -2 -2147483647 2147483649
+# expect: 509 1000080feff3412
+# expect: 8 4 11 | 99 4 11 | read
+# expect: True False 8 5
+# expect: [71, 73, 70]
+# expect: the slice ends at 2, before its start 5
+# expect: [18, 52, 1, 0, 255, 255]
+# expect: 65536 does not fit in 2 bytes (0 to 65535)
+# expect: 4 bytes at 4 go past the end of 6 bytes
