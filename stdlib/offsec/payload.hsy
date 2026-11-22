@@ -1,4 +1,4 @@
-# offsec.payload: build an exploit payload from mixed parts, and pad it.
+# offsec.payload: build an exploit payload from mixed parts.
 #
 #     p = payload.flat([
 #         Part.Bytes(cyclic.pattern(264)),
@@ -7,10 +7,10 @@
 #     ])
 #
 # A `Part` is raw bytes, a string's bytes, or an address packed for the target. `flat` joins
-# them into one `vector[u8]`. `fill` and `pad` make and extend runs of a byte (a NOP sled, or a
-# payload grown to a fixed size), on their own or inside a `Part.Bytes`.
+# them into one `vector[u8]`. For byte runs to put in a `Part.Bytes`, `binary.fill` makes one and
+# `binary.pad` extends a buffer to a length.
 
-from offsec.binary import Order, Width, BinaryError, push_u32, push_u64
+from binary import Order, Width, BinaryError, push_u32, push_u64
 
 # One piece of a payload.
 manual enum Part:
@@ -45,18 +45,4 @@ manual fn flat(owned parts: vector[Part], width: Width = Width.Bits64, order: Or
                     i += 1
             case Part.Address(value):
                 check push_address(&mut out, value, width, order)
-    return out
-
-# A run of `count` copies of `byte`, such as a NOP sled.
-manual fn fill(byte: u8, count: size) -> vector[u8]:
-    mut out: vector[u8] = []
-    for _ in range(count):
-        out.push(byte)
-    return out
-
-# `data` extended with `byte` up to `length`, or returned as it is when already that long.
-manual fn pad(owned data: vector[u8], length: size, byte: u8) -> vector[u8]:
-    mut out: vector[u8] = data
-    while len(out) < length:
-        out.push(byte)
     return out

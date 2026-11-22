@@ -1,6 +1,6 @@
-import offsec.binary
+import binary
 from io import print
-from offsec.binary import Order, BinaryError
+from binary import Order, BinaryError
 
 manual fn bytes_of(numbers: &vector[i64]) -> vector[u8]:
     mut out: vector[u8] = []

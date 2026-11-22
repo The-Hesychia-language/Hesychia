@@ -20,8 +20,8 @@ const MODULES: &[(&str, &str)] = &[
     ("re", include_str!("../stdlib/re.hsy")),
     ("url", include_str!("../stdlib/url.hsy")),
     ("args", include_str!("../stdlib/args.hsy")),
+    ("binary", include_str!("../stdlib/binary.hsy")),
     // OffSec: tools for security work, shipped with the compiler like the rest.
-    ("offsec.binary", include_str!("../stdlib/offsec/binary.hsy")),
     ("offsec.cyclic", include_str!("../stdlib/offsec/cyclic.hsy")),
     ("offsec.payload", include_str!("../stdlib/offsec/payload.hsy")),
     ("offsec.tube", include_str!("../stdlib/offsec/tube.hsy")),
