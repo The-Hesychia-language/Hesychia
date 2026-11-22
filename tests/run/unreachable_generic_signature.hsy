@@ -1,0 +1,10 @@
+# A function no code reaches names `set[i64]` in its signature: the `dict` inside the set
+# is never defined, so the methods that `show` would call must not be written either.
+from io import print
+
+managed fn walk(n: i64, seen: set[i64]):
+    seen.add(n)
+
+managed fn main():
+    print("reached")
+# expect: reached

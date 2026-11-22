@@ -168,6 +168,9 @@ struct Checker<'a> {
     probe: managed::Probe,
     /// A function given to `spawn` had its parameters made `owned`: infer again.
     modes_forced: bool,
+    /// The error that stopped the last probe of a `managed` function, by its index: with
+    /// its parameters owned, which the probe learns nothing from.
+    probe_errors: HashMap<usize, Diagnostic>,
     /// Errors the current function declares, and its name for messages.
     raises: Vec<Type>,
     fn_name: String,
@@ -244,6 +247,7 @@ impl<'a> Checker<'a> {
             infer_raises: false,
             probe: managed::Probe::default(),
             modes_forced: false,
+            probe_errors: HashMap::new(),
             raises: Vec::new(),
             fn_name: String::new(),
             self_type: None,
@@ -274,7 +278,7 @@ impl<'a> Checker<'a> {
             self.type_params = generics.iter().map(|(n, _)| (n.clone(), Type::Param(n.clone()))).collect();
             let deferred = comptime_fn::checked_per_call(method, &generics);
             self.bounds = generics.into_iter().collect();
-            let result = if deferred { Ok(()) } else { self.check_body(method, index) };
+            let result = if deferred { Ok(()) } else { self.check_real_body(method, index) };
             self.type_params.clear();
             self.bounds.clear();
             result?;
@@ -290,7 +294,7 @@ impl<'a> Checker<'a> {
         self.type_params = generics.iter().map(|(n, _)| (n.clone(), Type::Param(n.clone()))).collect();
         let deferred = comptime_fn::checked_per_call(f, &generics);
         self.bounds = generics.into_iter().collect();
-        let result = if deferred { Ok(()) } else { self.check_body(f, index) };
+        let result = if deferred { Ok(()) } else { self.check_real_body(f, index) };
         self.type_params.clear();
         self.bounds.clear();
         self.values.clear();
@@ -349,6 +353,17 @@ impl<'a> Checker<'a> {
 
     /// Checks a body against the signature `index`, with its parameters in scope.
     /// Checks a body; a `managed` body is checked again while its variables get wider.
+    /// Checks a function for the program. When its modes could not be inferred, the
+    /// error is the one the probe met: with modes left at `&`, the real check would stop
+    /// at the first change of a parameter instead.
+    fn check_real_body(&mut self, f: &mut FnDecl, index: usize) -> Result<()> {
+        let result = self.check_body(f, index);
+        match (result, self.probe_errors.remove(&index)) {
+            (Err(_), Some(probed)) => Err(probed),
+            (result, _) => result,
+        }
+    }
+
     fn check_body(&mut self, f: &mut FnDecl, index: usize) -> Result<()> {
         self.managed = f.level == crate::ast::Level::Managed;
         self.widened.clear();
@@ -392,6 +407,23 @@ impl<'a> Checker<'a> {
         self.copied.clear();
         self.moved_into.clear();
         self.probe.vars.clear();
+        // A pass that fails leaves its scopes open; a `managed` function is then checked
+        // again, and the functions after it must not see its variables.
+        let depth = self.scopes.len();
+        let result = self.check_scoped_body(f, params);
+        self.scopes.truncate(depth);
+        result?;
+        if self.ret != Type::Void && !stmt::always_returns(&f.body) {
+            return Err(Diagnostic::error(
+                f.span,
+                format!("function `{}` can end without returning a value", f.name),
+            ));
+        }
+        Ok(())
+    }
+
+    /// The parameters, then the body, in a scope of their own.
+    fn check_scoped_body(&mut self, f: &mut FnDecl, params: Vec<(String, Type)>) -> Result<()> {
         self.push_scope();
         for (position, (name, ty)) in params.into_iter().enumerate() {
             let ty = self.probe.declared_type(position).unwrap_or(ty);
@@ -406,12 +438,6 @@ impl<'a> Checker<'a> {
         }
         self.check_stmts(&mut f.body)?;
         self.pop_scope();
-        if self.ret != Type::Void && !stmt::always_returns(&f.body) {
-            return Err(Diagnostic::error(
-                f.span,
-                format!("function `{}` can end without returning a value", f.name),
-            ));
-        }
         Ok(())
     }
 

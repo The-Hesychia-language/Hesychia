@@ -1,0 +1,26 @@
+from io import print
+
+manual struct Oops:
+    reason: str
+
+# Checked first: `risky` is not known to raise yet, so this is checked again.
+managed fn prepare(path: str):
+    try:
+        risky(path)
+    except Oops as e:
+        print(f"{path}: {e.reason}")
+
+managed fn risky(p: str):
+    if p == "boom":
+        raise Oops(reason="no")
+
+# `path` is a new variable here, not the parameter of `prepare`.
+managed fn make() -> str:
+    path = "made"
+    return path
+
+managed fn main():
+    prepare("boom")
+    print(make())
+# expect: boom: no
+# expect: made

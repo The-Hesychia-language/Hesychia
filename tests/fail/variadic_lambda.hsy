@@ -1,0 +1,6 @@
+extern fn printf(format: ptr[u8], ...) -> i32
+
+manual fn main():
+    const n: i64 = 2
+    printf("%p".to_c(), lambda [&n] (x: i64) -> i64: x * n)
+# error: a lambda that captures can only be passed directly as an argument

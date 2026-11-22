@@ -20,6 +20,8 @@ pub struct Manifest {
     pub heap_threshold: Option<u64>,
     /// `[settings] targets`: what `hsy build` builds for; the host when empty.
     pub targets: Vec<Platform>,
+    /// `[settings] links`: C libraries the binary is linked with, `-l<name>` each.
+    pub links: Vec<String>,
 }
 
 pub struct Dependency {
@@ -58,6 +60,8 @@ pub struct Package {
 pub struct Project {
     pub manifest: Option<Manifest>,
     pub packages: Vec<Package>,
+    /// The C libraries of the project and of every dependency, each named once.
+    pub links: Vec<String>,
 }
 
 impl Project {
@@ -67,6 +71,7 @@ impl Project {
         Self {
             manifest: None,
             packages: vec![Package { prefix: String::new(), root, dependencies: HashMap::new() }],
+            links: Vec::new(),
         }
     }
 
@@ -78,7 +83,9 @@ impl Project {
             packages: Vec::new(),
             by_name: HashMap::new(),
             cache: dir.join(".hesychia/deps"),
+            links: Vec::new(),
         };
+        loader.add_links(&manifest.links);
         loader.packages.push(Package {
             prefix: String::new(),
             root: dir.join("src"),
@@ -86,7 +93,7 @@ impl Project {
         });
         loader.add_dependencies(0, &manifest, &mut lock)?;
         lock.write(dir)?;
-        Ok(Self { manifest: Some(manifest), packages: loader.packages })
+        Ok(Self { manifest: Some(manifest), packages: loader.packages, links: loader.links })
     }
 }
 
@@ -137,7 +144,30 @@ pub fn read_manifest(dir: &Path) -> Result<Manifest, String> {
                 .collect::<Result<_, _>>()?
         }
     };
-    Ok(Manifest { name, version, dependencies, heap_threshold, targets })
+    let links = match table.get("settings").and_then(|s| s.get("links")) {
+        None => Vec::new(),
+        Some(value) => {
+            let wrong = || format!("{shown}: `links` is a list of C library names, such as \"curl\"");
+            let names = value.as_array().ok_or_else(wrong)?;
+            names
+                .iter()
+                .map(|name| match name.as_str() {
+                    Some(name) if is_library_name(name) => Ok(name.to_string()),
+                    _ => Err(wrong()),
+                })
+                .collect::<Result<_, _>>()?
+        }
+    };
+    Ok(Manifest { name, version, dependencies, heap_threshold, targets, links })
+}
+
+/// A name the C compiler takes after `-l`: `curl`, `gtk-3`, `stdc++`, or `:libcurl.so.4` for
+/// the file itself; not a flag or a path.
+fn is_library_name(name: &str) -> bool {
+    let name = name.strip_prefix(':').unwrap_or(name);
+    !name.is_empty()
+        && !name.starts_with('-')
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | '+'))
 }
 
 /// `{ path = "../lib" }` or `{ git = "https://...", tag = "v1.0" }` (or `branch`, `rev`).
@@ -163,9 +193,18 @@ struct PackageLoader {
     /// Each dependency by name, with its source: one name is one package.
     by_name: HashMap<String, (Source, usize)>,
     cache: PathBuf,
+    links: Vec<String>,
 }
 
 impl PackageLoader {
+    fn add_links(&mut self, links: &[String]) {
+        for link in links {
+            if !self.links.contains(link) {
+                self.links.push(link.clone());
+            }
+        }
+    }
+
     fn add_dependencies(
         &mut self,
         package: usize,
@@ -198,6 +237,7 @@ impl PackageLoader {
         let root = folder.join("src");
         self.packages.push(Package { prefix: dep.name.clone(), root, dependencies: HashMap::new() });
         let manifest = read_manifest(&folder).map_err(|e| format!("dependency `{}`: {e}", dep.name))?;
+        self.add_links(&manifest.links);
         self.add_dependencies(index, &manifest, lock)?;
         Ok(index)
     }

@@ -1,0 +1,26 @@
+# A plain function goes to a variadic C function as a C function pointer, and `None` as NULL.
+from io import print
+
+extern fn snprintf(out: ptr[u8], length: size, format: ptr[u8], ...) -> i32
+
+manual fn square(x: i64) -> i64:
+    return x * x
+
+manual fn shown(value_is_function: bool) -> str:
+    mut buffer: vector[u8] = []
+    for _ in range(64):
+        buffer.push(0)
+    if value_is_function:
+        snprintf(ptr(&buffer[0]), 64, "%p".to_c(), square)
+    else:
+        snprintf(ptr(&buffer[0]), 64, "%p".to_c(), None)
+    return str.from_c(ptr(&buffer[0]))
+
+manual fn main():
+    const null: Optional[ptr[u8]] = None
+    mut buffer: vector[u8] = []
+    for _ in range(64):
+        buffer.push(0)
+    snprintf(ptr(&buffer[0]), 64, "%p".to_c(), null)
+    print(f"{shown(True) == shown(True)} {shown(True) != shown(False)} {shown(False) == str.from_c(ptr(&buffer[0]))}")
+# expect: True True True

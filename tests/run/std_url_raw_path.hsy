@@ -1,0 +1,20 @@
+# An encoded `/` (%2F) stays one name, through to_text and join.
+import url
+from io import print
+
+managed fn main():
+    u = url.parse("https://site.com/img/a%2Fb.png?x=1")
+    print(f"{u.path} | {u.raw_path} | {url.to_text(u)}")
+    j = url.join(u, "c%2Fd.png")
+    print(f"{j.path} | {url.to_text(j)}")
+    k = url.join(url.parse("https://site.com/img/%2e%2e%2f%2e%2e%2fevil.png"), "")
+    print(url.to_text(k))
+    p = url.parse("https://site.com/a b/é")
+    print(f"{p.path} | [{p.raw_path}] | {url.to_text(p)}")
+    p.path = "/changed"
+    print(url.to_text(p))
+# expect: /img/a/b.png | /img/a%2Fb.png | https://site.com/img/a%2Fb.png?x=1
+# expect: /img/c/d.png | https://site.com/img/c%2Fd.png
+# expect: https://site.com/img/%2e%2e%2f%2e%2e%2fevil.png
+# expect: /a b/é | [] | https://site.com/a%20b/%C3%A9
+# expect: https://site.com/changed
