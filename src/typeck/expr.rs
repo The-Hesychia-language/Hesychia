@@ -202,10 +202,10 @@ impl Checker<'_> {
                 let ty = self.check_pair(left, right, None, None)?;
                 match &ty {
                     Type::Param(name) => self.check_param_operator(op, name, span)?,
-                    Type::Struct(_) if !matches!(op, BinOp::Eq | BinOp::Ne) => {
+                    Type::Struct(_) | Type::Enum { .. } if !matches!(op, BinOp::Eq | BinOp::Ne) => {
                         if !self.has_operator(&ty, "compare") {
                             return Err(Diagnostic::error(span, format!("`{ty}` does not implement `Order`, needed by `{}`", op.symbol()))
-                                .with_hint(format!("write `struct ...(Order)` and define `method compare(&self, other: &{ty}) -> i32`")));
+                                .with_hint(format!("write `(Order)` on the type and define `method compare(&self, other: &{ty}) -> i32`")));
                         }
                     }
                     _ => check_comparable(op, &ty, span)?,

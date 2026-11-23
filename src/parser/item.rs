@@ -37,6 +37,7 @@ impl Parser {
         match &mut item {
             Item::Fn(f) => f.decorators = decorators,
             Item::Struct(s) => s.decorators = decorators,
+            Item::Enum(e) => e.decorators = decorators,
             // `@symbol("sqrt")` binds an `extern fn` of another name to that C function.
             Item::Extern(e) if decorators.len() == 1 && decorators[0].name == "symbol" => {
                 let [Expr { kind: ExprKind::Str(symbol), .. }] = &decorators[0].args[..] else {

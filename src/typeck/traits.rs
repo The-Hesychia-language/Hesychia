@@ -166,33 +166,48 @@ pub(super) fn sign_traits(tables: &mut Tables, program: &Program) -> Result<()> 
 pub(super) fn attach_traits(tables: &mut Tables, program: &mut Program) -> Result<()> {
     for (module, items) in program.modules.iter_mut().map(|m| &mut m.items).enumerate() {
         for item in items.iter_mut() {
-            let Item::Struct(s) = item else { continue };
-            let Some(Symbol::Struct(id)) = tables.lookup(module, &s.name) else {
-                if !s.generics.is_empty() {
-                    continue;
+            // Name, declared traits, body methods, and which tables to record into — the same
+            // for a struct and an enum, which have separate id spaces.
+            let (_name, declared, methods, id, is_enum) = match item {
+                Item::Struct(s) if s.generics.is_empty() => {
+                    let Some(Symbol::Struct(id)) = tables.lookup(module, &s.name) else { unreachable!("registered struct") };
+                    (s.name.clone(), &s.traits, &mut s.methods, id, false)
                 }
-                unreachable!("registered struct")
+                Item::Enum(e) if e.generics.is_empty() => {
+                    let Some(Symbol::Enum(id)) = tables.lookup(module, &e.name) else { unreachable!("registered enum") };
+                    (e.name.clone(), &e.traits, &mut e.methods, id, true)
+                }
+                _ => continue,
             };
             let mut traits = Vec::new();
-            for (name, span) in &s.traits {
-                let Some(Symbol::Trait(trait_id)) = tables.lookup(module, name) else {
-                    return Err(Diagnostic::error(*span, format!("unknown trait `{name}`")));
+            for (trait_name, span) in declared {
+                let Some(Symbol::Trait(trait_id)) = tables.lookup(module, trait_name) else {
+                    return Err(Diagnostic::error(*span, format!("unknown trait `{trait_name}`")));
                 };
                 if traits.contains(&trait_id) {
-                    return Err(Diagnostic::error(*span, format!("`{name}` is named twice")));
+                    return Err(Diagnostic::error(*span, format!("`{trait_name}` is named twice")));
                 }
                 traits.push(trait_id);
                 for method in &tables.traits[trait_id].methods {
                     let Some(default) = &method.default else { continue };
-                    if s.methods.iter().any(|m| m.name == method.name) {
+                    if methods.iter().any(|m| m.name == method.name) {
                         continue;
                     }
-                    s.methods.push(default.clone());
+                    methods.push(default.clone());
                     tables.fns.push(placeholder());
-                    tables.methods.insert((id, method.name.clone()), tables.fns.len() - 1);
+                    let slot = tables.fns.len() - 1;
+                    if is_enum {
+                        tables.enum_methods.insert((id, method.name.clone()), slot);
+                    } else {
+                        tables.methods.insert((id, method.name.clone()), slot);
+                    }
                 }
             }
-            tables.impls.insert(id, traits);
+            if is_enum {
+                tables.enum_impls.insert(id, traits);
+            } else {
+                tables.impls.insert(id, traits);
+            }
         }
     }
     Ok(())
@@ -215,34 +230,43 @@ fn placeholder() -> FnSig {
 pub(super) fn check_impls(tables: &mut Tables, program: &Program) -> Result<()> {
     for (module, items) in program.modules.iter().map(|m| &m.items).enumerate() {
         for item in items {
-            let Item::Struct(s) = item else { continue };
-            let Some(Symbol::Struct(id)) = tables.lookup(module, &s.name) else {
-                if !s.generics.is_empty() {
-                    continue;
+            let (type_name, decl_methods, decl_span, id, is_enum) = match item {
+                Item::Struct(s) if s.generics.is_empty() => {
+                    let Some(Symbol::Struct(id)) = tables.lookup(module, &s.name) else { unreachable!("registered struct") };
+                    (s.name.clone(), &s.methods, s.span, id, false)
                 }
-                unreachable!("registered struct")
+                Item::Enum(e) if e.generics.is_empty() => {
+                    let Some(Symbol::Enum(id)) = tables.lookup(module, &e.name) else { unreachable!("registered enum") };
+                    (e.name.clone(), &e.methods, e.span, id, true)
+                }
+                _ => continue,
             };
-            let owner = Type::Struct(Named { id, name: s.name.clone() });
-            for &trait_id in &tables.impls[&id].clone() {
+            let owner = if is_enum {
+                Type::Enum { named: Named { id, name: type_name.clone() }, plain: tables.types.enums[id].plain }
+            } else {
+                Type::Struct(Named { id, name: type_name.clone() })
+            };
+            let impls = if is_enum { &tables.enum_impls } else { &tables.impls };
+            for &trait_id in &impls[&id].clone() {
                 let def = &tables.traits[trait_id];
                 for method in &def.methods {
-                    let Some(&index) = tables.methods.get(&(id, method.name.clone())) else {
+                    let slot = if is_enum {
+                        tables.enum_methods.get(&(id, method.name.clone()))
+                    } else {
+                        tables.methods.get(&(id, method.name.clone()))
+                    };
+                    let Some(&index) = slot else {
                         return Err(Diagnostic::error(
-                            s.span,
-                            format!(
-                                "`{}` implements `{}` but has no method `{}`",
-                                s.name, def.name, method.name
-                            ),
+                            decl_span,
+                            format!("`{type_name}` implements `{}` but has no method `{}`", def.name, method.name),
                         )
                         .with_hint(format!("define `{}`", shown(method, &owner))));
                     };
-                    let sig = &tables.fns[index];
-                    if !matches(sig, method, &owner) {
-                        let span =
-                            s.methods.iter().find(|m| m.name == method.name).map_or(s.span, |m| m.span);
+                    if !matches(&tables.fns[index], method, &owner) {
+                        let span = decl_methods.iter().find(|m| m.name == method.name).map_or(decl_span, |m| m.span);
                         return Err(Diagnostic::error(
                             span,
-                            format!("`{}.{}` does not match the trait `{}`", s.name, method.name, def.name),
+                            format!("`{type_name}.{}` does not match the trait `{}`", method.name, def.name),
                         )
                         .with_hint(format!("expected `{}`", shown(method, &owner))));
                     }
@@ -250,8 +274,12 @@ pub(super) fn check_impls(tables: &mut Tables, program: &Program) -> Result<()> 
                 if def.module.is_none() {
                     let names: Vec<String> = def.methods.iter().map(|m| m.name.clone()).collect();
                     for name in names {
-                        let c_name = method_c_name(module, &s.name, &name);
-                        tables.types.structs[id].operators.insert(name, c_name);
+                        let c_name = method_c_name(module, &type_name, &name);
+                        if is_enum {
+                            tables.types.enums[id].operators.insert(name, c_name);
+                        } else {
+                            tables.types.structs[id].operators.insert(name, c_name);
+                        }
                     }
                 }
             }

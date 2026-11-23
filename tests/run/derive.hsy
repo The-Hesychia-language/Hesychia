@@ -1,0 +1,47 @@
+from io import print
+
+# `@derive` generates the structural trait methods from the fields.
+@derive(Equal, Order, Hash, Show)
+manual struct Inner:
+    v: i32
+
+@derive(Equal, Order, Hash, Show)
+manual struct Point:
+    x: i32
+    label: str
+    inner: Inner
+
+# Enums derive the same four; ordering ranks by variant (declaration order) then by fields.
+@derive(Equal, Order, Hash, Show)
+manual enum Token:
+    End
+    Number(value: i64)
+    Word(text: str)
+
+manual fn main():
+    const a: Point = Point(x=1, label="a", inner=Inner(v=3))
+    const same: Point = Point(x=1, label="a", inner=Inner(v=3))
+    const bigger: Point = Point(x=1, label="a", inner=Inner(v=9))
+    print(f"{a}")
+    print(f"{a == same} {a == bigger}")
+    print(f"{a < bigger} {bigger < a}")
+    mut seen: dict[Point, i32] = dict[Point, i32]()
+    seen[a] = 7
+    print(f"{seen[same]}")
+
+    const n: Token = Token.Number(value=7)
+    const end: Token = Token.End
+    const w: Token = Token.Word(text="hi")
+    print(f"{n} {end}")
+    print(f"{n == Token.Number(value=7)} {end < n} {n < w}")
+    mut kinds: dict[Token, i32] = dict[Token, i32]()
+    kinds[Token.Number(value=7)] = 1
+    const probe: Token = Token.Number(value=7)
+    print(f"{kinds[probe]}")
+# expect: Point(x=1, label=a, inner=Inner(v=3))
+# expect: True False
+# expect: True False
+# expect: 7
+# expect: Token.Number(value=7) Token.End
+# expect: True True True
+# expect: 1

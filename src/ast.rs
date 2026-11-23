@@ -221,7 +221,13 @@ pub struct EnumDecl {
     pub private: bool,
     pub name: String,
     pub generics: Vec<GenericParam>,
+    /// The traits named in `enum Name(TraitA, TraitB)`.
+    pub traits: Vec<(String, Span)>,
     pub variants: Vec<VariantDecl>,
+    /// Methods declared in the enum body, like a struct's.
+    pub methods: Vec<FnDecl>,
+    /// `@derive(...)` and any other decorators written above the enum.
+    pub decorators: Vec<Decorator>,
     /// The comment above the enum.
     pub doc: String,
     pub span: Span,

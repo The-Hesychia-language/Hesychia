@@ -26,6 +26,9 @@ pub fn reachable_from(program: &Program, roots: Vec<String>) -> HashSet<String> 
                 Item::Struct(s) if s.generics.is_empty() => {
                     s.methods.iter().map(|m| (method_c_name(index, &s.name, &m.name), m)).collect()
                 }
+                Item::Enum(e) if e.generics.is_empty() => {
+                    e.methods.iter().map(|m| (method_c_name(index, &e.name, &m.name), m)).collect()
+                }
                 _ => Vec::new(),
             })
         })

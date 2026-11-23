@@ -26,7 +26,7 @@ mod traits;
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 
-use crate::ast::{FnDecl, Item, Program, StructDecl, TypeExpr, method_c_name};
+use crate::ast::{FnDecl, Item, Program, TypeExpr, method_c_name};
 use crate::comptime::{Target, Value};
 use crate::diag::{Diagnostic, Result, Span};
 use crate::types::{Type, TypeTable};
@@ -62,7 +62,14 @@ pub fn check(program: &mut Program, target: &Target) -> Result<Checked> {
         for item in &mut module.items {
             match item {
                 Item::Fn(f) => checker.check_fn(f)?,
-                Item::Struct(s) if s.generics.is_empty() => checker.check_methods(s)?,
+                Item::Struct(s) if s.generics.is_empty() => {
+                    let name = s.name.clone();
+                    checker.check_methods(&mut s.methods, &name, false)?;
+                }
+                Item::Enum(e) if e.generics.is_empty() => {
+                    let name = e.name.clone();
+                    checker.check_methods(&mut e.methods, &name, true)?;
+                }
                 Item::Global(g) => checker.check_global(g)?,
                 _ => {}
             }
@@ -279,11 +286,16 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn check_methods(&mut self, s: &mut StructDecl) -> Result<()> {
-        let Some(Symbol::Struct(id)) = self.global(&s.name) else { unreachable!("registered struct") };
-        self.self_type = Some(Type::Struct(crate::types::Named { id, name: s.name.clone() }));
-        for method in &mut s.methods {
-            let c_name = method_c_name(self.module, &s.name, &method.name);
+    fn check_methods(&mut self, methods: &mut [FnDecl], name: &str, is_enum: bool) -> Result<()> {
+        self.self_type = Some(if is_enum {
+            let Some(Symbol::Enum(id)) = self.global(name) else { unreachable!("registered enum") };
+            Type::Enum { named: crate::types::Named { id, name: name.to_string() }, plain: self.tables.types.enums[id].plain }
+        } else {
+            let Some(Symbol::Struct(id)) = self.global(name) else { unreachable!("registered struct") };
+            Type::Struct(crate::types::Named { id, name: name.to_string() })
+        });
+        for method in methods.iter_mut() {
+            let c_name = method_c_name(self.module, name, &method.name);
             let index = self.tables.fns.iter().position(|sig| sig.c_name == c_name).expect("signed method");
             let generics = self.tables.fns[index].generics.clone();
             self.type_params = generics.iter().map(|(n, _)| (n.clone(), Type::Param(n.clone()))).collect();

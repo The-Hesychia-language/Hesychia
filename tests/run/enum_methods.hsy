@@ -1,0 +1,33 @@
+from io import print
+
+# A manual enum can carry methods and implement traits, like a struct.
+manual enum Shape(Hash):
+    Dot
+    Circle(radius: i32)
+
+    method area(&self) -> i32:
+        match self:
+            case Shape.Dot:
+                return 0
+            case Shape.Circle(r):
+                return r * r * 3
+
+    method hash(&self) -> u64:
+        match self:
+            case Shape.Dot:
+                return 0
+            case Shape.Circle(r):
+                return r.hash()
+
+manual fn main():
+    const c: Shape = Shape.Circle(radius=4)
+    const d: Shape = Shape.Dot
+    print(f"{c.area()} {d.area()}")
+    # The hand-written hash lets the enum be a dict key.
+    mut seen: dict[Shape, str] = dict[Shape, str]()
+    seen[Shape.Circle(radius=4)] = "big"
+    seen[Shape.Dot] = "none"
+    const probe: Shape = Shape.Circle(radius=4)
+    print(f"{seen[probe]} {len(seen)}")
+# expect: 48 0
+# expect: big 2
