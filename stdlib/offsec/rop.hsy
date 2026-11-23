@@ -1,0 +1,132 @@
+# offsec.rop: find gadgets in an ELF and assemble a return-oriented chain (x86, 32- and 64-bit).
+#
+#     const data: vector[u8] = check fs.read_bytes("./target")
+#     const file: Elf = check elf.parse(&data)
+#     const pop_rdi: Optional[u64] = rop.find(&data, &file, Gadget.PopRdi)
+#     if pop_rdi is not None:
+#         mut c: Chain = rop.chain(Width.Bits64)
+#         c.set_reg(pop_rdi, 0x404000)        # load a value into rdi
+#         c.raw(win_address)                   # then return into `win`
+#         const payload: vector[u8] = c.bytes()
+#
+# `find`/`find_gadget` search the executable segments for a byte pattern and return its virtual
+# address. The search is byte-exact and unaligned on purpose: a return-oriented gadget is any run
+# of bytes that ends in a `ret`, wherever it falls, so it finds the unaligned ones a disassembler
+# would miss. For a PIE binary the address is the static one; add the leaked base yourself.
+# `Chain` lays addresses and values into the bytes you place after the overflow padding.
+
+from binary import Width, Order
+from elf import Elf, PF_X
+
+# A common gadget, for `find`. Pop-register gadgets share their bytes between 32- and 64-bit
+# (they pop the e- register in 32-bit, the r- register in 64-bit); `Syscall` differs, so `find`
+# picks `syscall` or `int 0x80` from the ELF's class.
+manual enum Gadget:
+    Ret
+    Syscall
+    PopRax
+    PopRbx
+    PopRcx
+    PopRdx
+    PopRsi
+    PopRdi
+    PopRbp
+
+priv manual fn one(a: i64) -> vector[u8]:
+    mut v: vector[u8] = []
+    v.push(u8(a))
+    return v
+
+priv manual fn two(a: i64, b: i64) -> vector[u8]:
+    mut v: vector[u8] = []
+    v.push(u8(a))
+    v.push(u8(b))
+    return v
+
+# The byte pattern for `gadget`, for the ELF's class.
+priv manual fn gadget_bytes(gadget: Gadget, bits: Width) -> vector[u8]:
+    match gadget:
+        case Gadget.Ret:
+            return one(0xc3)
+        case Gadget.Syscall:
+            if bits == Width.Bits64:
+                return two(0x0f, 0x05)
+            return two(0xcd, 0x80)
+        case Gadget.PopRax:
+            return two(0x58, 0xc3)
+        case Gadget.PopRbx:
+            return two(0x5b, 0xc3)
+        case Gadget.PopRcx:
+            return two(0x59, 0xc3)
+        case Gadget.PopRdx:
+            return two(0x5a, 0xc3)
+        case Gadget.PopRsi:
+            return two(0x5e, 0xc3)
+        case Gadget.PopRdi:
+            return two(0x5f, 0xc3)
+        case Gadget.PopRbp:
+            return two(0x5d, 0xc3)
+
+priv manual fn matches(data: &vector[u8], at: size, pattern: &vector[u8]) -> bool:
+    mut i: size = 0
+    while i < len(pattern):
+        if data[at + i] != pattern[i]:
+            return False
+        i += 1
+    return True
+
+# The virtual address of the first `pattern` in an executable segment, or `None`.
+manual fn find_gadget(data: &vector[u8], file: &Elf, pattern: &vector[u8]) -> Optional[size]:
+    if len(pattern) == 0:
+        return None
+    for seg in &file.segments:
+        if seg.flags & PF_X != 0:
+            const start: size = size(seg.offset)
+            mut end: size = size(seg.offset + seg.filesz)
+            if end > len(data):
+                end = len(data)
+            if start < end:
+                mut i: size = start
+                while i + len(pattern) <= end:
+                    if matches(data, i, pattern):
+                        return size(seg.vaddr) + (i - start)
+                    i += 1
+    return None
+
+# The virtual address of a common `gadget`, or `None`.
+manual fn find(data: &vector[u8], file: &Elf, gadget: Gadget) -> Optional[size]:
+    const pattern: vector[u8] = gadget_bytes(gadget, file.header.bits)
+    return find_gadget(data, file, &pattern)
+
+# A return-oriented chain: a sequence of words (addresses and values) to place on the stack. Each
+# word is 8 bytes for `Bits64`, 4 for `Bits32`, little-endian.
+manual struct Chain:
+    priv bits: Width
+    priv words: vector[u64]
+
+    # Adds one raw word (a gadget address, a return address, or a value).
+    method raw(&mut self, value: u64):
+        self.words.push(value)
+
+    # Adds a `pop; ret` gadget followed by the value it pops into its register.
+    method set_reg(&mut self, pop_gadget: u64, value: u64):
+        self.words.push(pop_gadget)
+        self.words.push(value)
+
+    # The chain as bytes, to place after the padding (e.g. in a `payload.Part.Bytes`).
+    method bytes(&self) -> vector[u8]:
+        mut width: size = 8
+        if self.bits == Width.Bits32:
+            width = 4
+        mut out: vector[u8] = []
+        for w in &self.words:
+            mut k: size = 0
+            while k < width:
+                out.push(u8((w >> u64(8 * k)) & u64(255)))
+                k += 1
+        return out
+
+# A new, empty chain for a target of this class.
+manual fn chain(bits: Width) -> Chain:
+    mut words: vector[u64] = []
+    return Chain(bits=bits, words=words)

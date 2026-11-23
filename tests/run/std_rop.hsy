@@ -1,0 +1,69 @@
+from io import print
+from binary import Order, Width, read_u64, push_u16, push_u32, push_u64
+from elf import parse
+from offsec.rop import find, chain, Gadget
+
+managed fn p16(out: vector[u8], v: i64, order: Order):
+    push_u16(out, v, order)
+
+managed fn p32(out: vector[u8], v: i64, order: Order):
+    push_u32(out, v, order)
+
+managed fn p64(out: vector[u8], v: i64, order: Order):
+    push_u64(out, u64(v), order)
+
+# A minimal 64-bit ELF: header, one executable PT_LOAD covering three code bytes nop; pop rdi; ret.
+managed fn build() -> vector[u8]:
+    order = Order.Little
+    out = vector[u8]()
+    for b in [0x7f, 0x45, 0x4c, 0x46, 2, 1, 1]:
+        out.push(u8(b))
+    for _ in range(9):
+        out.push(u8(0))
+    p16(out, 2, order)
+    p16(out, 62, order)
+    p32(out, 1, order)
+    p64(out, 0x400078, order)
+    p64(out, 64, order)
+    p64(out, 0, order)
+    p32(out, 0, order)
+    p16(out, 64, order)
+    p16(out, 56, order)
+    p16(out, 1, order)
+    p16(out, 0, order)
+    p16(out, 0, order)
+    p16(out, 0, order)
+    p32(out, 1, order)
+    p32(out, 5, order)
+    p64(out, 120, order)
+    p64(out, 0x400078, order)
+    p64(out, 0x400078, order)
+    p64(out, 3, order)
+    p64(out, 3, order)
+    p64(out, 0x1000, order)
+    out.push(u8(0x90))
+    out.push(u8(0x5f))
+    out.push(u8(0xc3))
+    return out
+
+managed fn main():
+    data = build()
+    file = parse(data)
+    pr = find(data, file, Gadget.PopRdi)
+    rt = find(data, file, Gadget.Ret)
+    sc = find(data, file, Gadget.Syscall)
+    if pr is not None:
+        print(f"pop_rdi={pr:x}")
+    if rt is not None:
+        print(f"ret={rt:x}")
+    if sc is None:
+        print("syscall=none")
+    c = chain(Width.Bits64)
+    c.set_reg(0x400079, 0x1122334455667788)
+    c.raw(0x400078)
+    b = c.bytes()
+    print(f"chain={len(b)} {read_u64(b, 0, Order.Little):x} {read_u64(b, 8, Order.Little):x} {read_u64(b, 16, Order.Little):x}")
+# expect: pop_rdi=400079
+# expect: ret=40007a
+# expect: syscall=none
+# expect: chain=24 400079 1122334455667788 400078
