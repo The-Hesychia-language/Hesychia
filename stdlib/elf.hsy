@@ -479,6 +479,23 @@ manual fn parse(data: &vector[u8]) -> Elf raises ElfError:
     except BinaryError as e:
         raise ElfError(at=e.at, reason=e.reason.copy())
 
+# The first section named `name`, or `None`.
+manual fn find_section(file: &Elf, name: &str) -> Optional[Section]:
+    for s in &file.sections:
+        if s.name == name:
+            return s.copy()
+    return None
+
+# The first symbol named `name`, searched in `.symtab` then `.dynsym`, or `None`.
+manual fn find_symbol(file: &Elf, name: &str) -> Optional[Symbol]:
+    for s in &file.symbols:
+        if s.name == name:
+            return s.copy()
+    for s in &file.dynamic_symbols:
+        if s.name == name:
+            return s.copy()
+    return None
+
 # A field of a program header, for `Editor.set_segment_field`.
 manual enum SegmentField:
     Type
