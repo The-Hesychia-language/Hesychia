@@ -5,13 +5,16 @@
 #     for s in &file.symbols:
 #         print(f"{s.value} {s.name}")
 #
-# Layer 1 is read-only. It parses the header, sections, segments and symbol tables of both
-# 32-bit and 64-bit ELF in either byte order, widening every address and size to `u64`. Names
-# are copied out, so the `Elf` owns its data and the input bytes can be dropped after parsing.
-# Parsing is robust: it reads what it can for analysing hostile or malformed binaries, and only
-# raises `ElfError` on a fatal problem (bad magic, a truncated header, a table past the end).
+# `parse` is read-only. It reads the header, sections, segments and symbol tables of both 32-bit
+# and 64-bit ELF in either byte order, widening every address and size to `u64`. Names are copied
+# out, so the `Elf` owns its data and the input bytes can be dropped after parsing. Parsing is
+# robust: it reads what it can for analysing hostile or malformed binaries, and only raises
+# `ElfError` on a fatal problem (bad magic, a truncated header, a table past the end).
+#
+# `edit` opens an `Editor` for surgical changes to a copy of the bytes — set the entry point or a
+# segment/section field, patch bytes, append data — then `build` emits the modified ELF.
 
-from binary import Order, Width, BinaryError, read_u8, read_u16, read_u32, read_u64
+from binary import Order, Width, BinaryError, read_u8, read_u16, read_u32, read_u64, put_u32, put_u64
 
 # The kind of file: `e_type`. `Rel` is an object file, `Exec` an executable, `Dyn` a shared
 # library or PIE, `Core` a core dump; anything else (including `ET_NONE`) is `Unknown`.
@@ -475,3 +478,220 @@ manual fn parse(data: &vector[u8]) -> Elf raises ElfError:
         return check parse_body(data, bits, order)
     except BinaryError as e:
         raise ElfError(at=e.at, reason=e.reason.copy())
+
+# A field of a program header, for `Editor.set_segment_field`.
+manual enum SegmentField:
+    Type
+    Flags
+    Offset
+    Vaddr
+    Paddr
+    FileSz
+    MemSz
+    Align
+
+# A field of a section header, for `Editor.set_section_field`.
+manual enum SectionField:
+    Name
+    Type
+    Flags
+    Addr
+    Offset
+    Size
+    Link
+    Info
+    AddrAlign
+    EntSize
+
+# The byte offset within a program header, and the field's width in bytes, for this class.
+priv manual fn seg_field(bits: Width, field: SegmentField) -> (size, size):
+    if bits == Width.Bits64:
+        match field:
+            case SegmentField.Type:
+                return (0, 4)
+            case SegmentField.Flags:
+                return (4, 4)
+            case SegmentField.Offset:
+                return (8, 8)
+            case SegmentField.Vaddr:
+                return (16, 8)
+            case SegmentField.Paddr:
+                return (24, 8)
+            case SegmentField.FileSz:
+                return (32, 8)
+            case SegmentField.MemSz:
+                return (40, 8)
+            case SegmentField.Align:
+                return (48, 8)
+    match field:
+        case SegmentField.Type:
+            return (0, 4)
+        case SegmentField.Offset:
+            return (4, 4)
+        case SegmentField.Vaddr:
+            return (8, 4)
+        case SegmentField.Paddr:
+            return (12, 4)
+        case SegmentField.FileSz:
+            return (16, 4)
+        case SegmentField.MemSz:
+            return (20, 4)
+        case SegmentField.Flags:
+            return (24, 4)
+        case SegmentField.Align:
+            return (28, 4)
+
+# The byte offset within a section header, and the field's width in bytes, for this class.
+priv manual fn sec_field(bits: Width, field: SectionField) -> (size, size):
+    if bits == Width.Bits64:
+        match field:
+            case SectionField.Name:
+                return (0, 4)
+            case SectionField.Type:
+                return (4, 4)
+            case SectionField.Flags:
+                return (8, 8)
+            case SectionField.Addr:
+                return (16, 8)
+            case SectionField.Offset:
+                return (24, 8)
+            case SectionField.Size:
+                return (32, 8)
+            case SectionField.Link:
+                return (40, 4)
+            case SectionField.Info:
+                return (44, 4)
+            case SectionField.AddrAlign:
+                return (48, 8)
+            case SectionField.EntSize:
+                return (56, 8)
+    match field:
+        case SectionField.Name:
+            return (0, 4)
+        case SectionField.Type:
+            return (4, 4)
+        case SectionField.Flags:
+            return (8, 4)
+        case SectionField.Addr:
+            return (12, 4)
+        case SectionField.Offset:
+            return (16, 4)
+        case SectionField.Size:
+            return (20, 4)
+        case SectionField.Link:
+            return (24, 4)
+        case SectionField.Info:
+            return (28, 4)
+        case SectionField.AddrAlign:
+            return (32, 4)
+        case SectionField.EntSize:
+            return (36, 4)
+
+# Writes `value` as `width` (4 or 8) bytes at `at`, in `order`.
+priv manual fn write_int(data: &mut vector[u8], at: size, value: u64, width: size, order: Order) raises ElfError:
+    try:
+        if width == 8:
+            check put_u64(data, at, value, order)
+        else:
+            if value > u64(4294967295):
+                raise ElfError(at=at, reason=f"{value} does not fit in 4 bytes")
+            check put_u32(data, at, i64(value), order)
+    except BinaryError as e:
+        raise ElfError(at=e.at, reason=e.reason.copy())
+
+# Surgical edits to a copy of an ELF's bytes: set fields, patch, append, then `build`.
+manual struct Editor:
+    priv bytes: vector[u8]
+    priv bits: Width
+    priv order: Order
+    priv phoff: size
+    priv phentsize: size
+    priv phnum: size
+    priv shoff: size
+    priv shentsize: size
+    priv shnum: size
+    header: Header
+    sections: vector[Section]
+    segments: vector[Segment]
+
+    # Sets the entry point (`e_entry`).
+    method set_entry(&mut self, addr: u64) raises ElfError:
+        mut w: size = 4
+        if self.bits == Width.Bits64:
+            w = 8
+        const order: Order = self.order
+        check write_int(&mut self.bytes, 24, addr, w, order)
+
+    # Sets one field of segment `index`.
+    method set_segment_field(&mut self, index: size, field: SegmentField, value: u64) raises ElfError:
+        if index >= self.phnum:
+            raise ElfError(at=0, reason=f"segment {index} is out of range")
+        const (off, width): (size, size) = seg_field(self.bits, field)
+        const at: size = self.phoff + index * self.phentsize + off
+        const order: Order = self.order
+        check write_int(&mut self.bytes, at, value, width, order)
+
+    # Sets one field of section `index`.
+    method set_section_field(&mut self, index: size, field: SectionField, value: u64) raises ElfError:
+        if index >= self.shnum:
+            raise ElfError(at=0, reason=f"section {index} is out of range")
+        const (off, width): (size, size) = sec_field(self.bits, field)
+        const at: size = self.shoff + index * self.shentsize + off
+        const order: Order = self.order
+        check write_int(&mut self.bytes, at, value, width, order)
+
+    # Overwrites the bytes at `offset` with `data`.
+    method patch(&mut self, offset: size, data: &vector[u8]) raises ElfError:
+        if offset > len(self.bytes) or len(data) > len(self.bytes) - offset:
+            raise ElfError(at=offset, reason="the patch goes past the end")
+        for i in range(len(data)):
+            self.bytes[offset + i] = data[i]
+
+    # Overwrites 8 bytes at `offset` with `value`, in the ELF's byte order.
+    method patch_u64(&mut self, offset: size, value: u64) raises ElfError:
+        const order: Order = self.order
+        check write_int(&mut self.bytes, offset, value, 8, order)
+
+    # Overwrites 4 bytes at `offset` with `value`, in the ELF's byte order.
+    method patch_u32(&mut self, offset: size, value: u64) raises ElfError:
+        const order: Order = self.order
+        check write_int(&mut self.bytes, offset, value, 4, order)
+
+    # Appends `data` at the end, and gives the file offset where it starts.
+    method append(&mut self, data: &vector[u8]) -> size:
+        const at: size = len(self.bytes)
+        for b in data:
+            self.bytes.push(b)
+        return at
+
+    # The modified ELF. Consumes the editor.
+    method build(owned self) -> vector[u8]:
+        return self.bytes.copy()
+
+# Opens an `Editor` over a copy of `data`, parsed to locate every field.
+manual fn edit(owned data: vector[u8]) -> Editor raises ElfError:
+    const parsed: Elf = check parse(&data)
+    const bits: Width = parsed.header.bits
+    const order: Order = parsed.header.data
+    mut phentsize: size = 0
+    mut shentsize: size = 0
+    try:
+        if bits == Width.Bits64:
+            phentsize = size(check read_u16(&data, 54, order))
+            shentsize = size(check read_u16(&data, 58, order))
+        else:
+            phentsize = size(check read_u16(&data, 42, order))
+            shentsize = size(check read_u16(&data, 46, order))
+    except BinaryError as e:
+        raise ElfError(at=e.at, reason=e.reason.copy())
+    if phentsize == 0:
+        if bits == Width.Bits64:
+            phentsize = 56
+        else:
+            phentsize = 32
+    if shentsize == 0:
+        if bits == Width.Bits64:
+            shentsize = 64
+        else:
+            shentsize = 40
+    return Editor(bytes=data, bits=bits, order=order, phoff=size(parsed.header.phoff), phentsize=phentsize, phnum=size(parsed.header.phnum), shoff=size(parsed.header.shoff), shentsize=shentsize, shnum=size(parsed.header.shnum), header=parsed.header.copy(), sections=parsed.sections.copy(), segments=parsed.segments.copy())
