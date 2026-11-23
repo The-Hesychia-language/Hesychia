@@ -1,0 +1,31 @@
+from io import print
+
+# `@derive` generates the structural trait methods from the fields.
+@derive(Equal, Order, Hash, Show)
+manual struct Inner:
+    v: i32
+
+@derive(Equal, Order, Hash, Show)
+manual struct Point:
+    x: i32
+    label: str
+    inner: Inner
+
+manual fn main():
+    const a: Point = Point(x=1, label="a", inner=Inner(v=3))
+    const same: Point = Point(x=1, label="a", inner=Inner(v=3))
+    const bigger: Point = Point(x=1, label="a", inner=Inner(v=9))
+    # Show, including the nested struct.
+    print(f"{a}")
+    # Equal.
+    print(f"{a == same} {a == bigger}")
+    # Order: fields compared in declaration order, so the inner `v` breaks the tie.
+    print(f"{a < bigger} {bigger < a}")
+    # Hash + Equal let a derived struct be a dict key.
+    mut seen: dict[Point, i32] = dict[Point, i32]()
+    seen[a] = 7
+    print(f"{seen[same]}")
+# expect: Point(x=1, label=a, inner=Inner(v=3))
+# expect: True False
+# expect: True False
+# expect: 7

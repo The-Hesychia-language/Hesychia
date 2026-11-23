@@ -57,7 +57,9 @@ pub fn load(
         }
         modules.push(Module { name, stdlib, imports: parsed.imports, items });
     }
-    Ok(Program { modules })
+    let mut program = Program { modules };
+    crate::derive::expand(&mut program, sources)?;
+    Ok(program)
 }
 
 /// The `@test` functions of the file, checked to take and give nothing.

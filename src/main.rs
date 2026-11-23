@@ -3,6 +3,7 @@
 mod ast;
 mod codegen;
 mod comptime;
+mod derive;
 mod diag;
 mod driver;
 mod lexer;
