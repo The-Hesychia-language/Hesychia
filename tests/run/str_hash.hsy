@@ -1,0 +1,16 @@
+from io import print
+
+# `str.hash` is written in Hesychia (FNV-1a + the shared finisher); these are the values the
+# C version produced, so the move kept them bit-for-bit.
+manual fn main():
+    print(f"{"".hash()}")
+    print(f"{"abc".hash()}")
+    # The hash drives dict lookup, including collisions and updates.
+    mut d: dict[str, i32] = dict[str, i32]()
+    d["apple"] = 1
+    d["banana"] = 2
+    d["apple"] += 10
+    print(f"{d["apple"]} {d["banana"]} {"apple" in d} {"pear" in d}")
+# expect: 14087677454934409008
+# expect: 3018304574923447344
+# expect: 11 2 True False

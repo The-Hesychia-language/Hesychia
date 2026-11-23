@@ -238,9 +238,6 @@ impl Emitter<'_> {
             Builtin::SharedNew => self.emit_shared_new(args[0].ty(), &values[0]),
             Builtin::StrToC => format!("hsy_str_c({})", values[0]),
             Builtin::StrFromC => format!("hsy_str_from_c({})", values[0]),
-            Builtin::Hash if matches!(args[0].ty(), Type::Ref(inner, _) if **inner == Type::Str) => {
-                format!("hsy_str_hash({})", values[0])
-            }
             Builtin::Hash => format!("hsy_hash64((uint64_t)*({}))", values[0]),
             Builtin::StrByte => format!("hsy_str_byte({}, {})", values[0], values[1]),
             Builtin::WrappingAdd | Builtin::WrappingSub | Builtin::WrappingMul => {
