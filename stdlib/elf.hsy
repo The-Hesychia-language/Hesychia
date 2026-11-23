@@ -1,0 +1,477 @@
+# elf: read an ELF file (executable, object, or shared library) into a structured form.
+#
+#     const data: vector[u8] = check fs.read_bytes("a.out")
+#     const file: Elf = check elf.parse(&data)
+#     for s in &file.symbols:
+#         print(f"{s.value} {s.name}")
+#
+# Layer 1 is read-only. It parses the header, sections, segments and symbol tables of both
+# 32-bit and 64-bit ELF in either byte order, widening every address and size to `u64`. Names
+# are copied out, so the `Elf` owns its data and the input bytes can be dropped after parsing.
+# Parsing is robust: it reads what it can for analysing hostile or malformed binaries, and only
+# raises `ElfError` on a fatal problem (bad magic, a truncated header, a table past the end).
+
+from binary import Order, Width, BinaryError, read_u8, read_u16, read_u32, read_u64
+
+# The kind of file: `e_type`. `Rel` is an object file, `Exec` an executable, `Dyn` a shared
+# library or PIE, `Core` a core dump; anything else (including `ET_NONE`) is `Unknown`.
+manual enum Kind:
+    Rel
+    Exec
+    Dyn
+    Core
+    Unknown(value: u16)
+
+# The target machine: `e_machine`. Only the common ones are named; the rest are `Unknown`.
+manual enum Machine:
+    X86
+    X86_64
+    Arm
+    Aarch64
+    RiscV
+    Unknown(value: u16)
+
+# A section's kind: `sh_type`.
+manual enum SectionKind:
+    Null
+    ProgBits
+    SymTab
+    StrTab
+    Rela
+    Hash
+    Dynamic
+    Note
+    NoBits
+    Rel
+    DynSym
+    InitArray
+    FiniArray
+    Unknown(value: u32)
+
+# A segment's kind: `p_type`.
+manual enum SegmentKind:
+    Null
+    Load
+    Dynamic
+    Interp
+    Note
+    Phdr
+    Tls
+    GnuEhFrame
+    GnuStack
+    GnuRelro
+    Unknown(value: u32)
+
+# A symbol's binding: the high nibble of `st_info`.
+manual enum Bind:
+    Local
+    Global
+    Weak
+    Unknown(value: u8)
+
+# A symbol's type: the low nibble of `st_info`.
+manual enum SymbolType:
+    NoType
+    Object
+    Func
+    Section
+    File
+    Common
+    Tls
+    Unknown(value: u8)
+
+# Section flag bits, tested against `Section.flags`.
+const SHF_WRITE: u64 = 1
+const SHF_ALLOC: u64 = 2
+const SHF_EXECINSTR: u64 = 4
+
+# Segment flag bits, tested against `Segment.flags`.
+const PF_X: u32 = 1
+const PF_W: u32 = 2
+const PF_R: u32 = 4
+
+# The ELF header. `bits` is the class (32- or 64-bit), `data` the byte order.
+manual struct Header:
+    bits: Width
+    data: Order
+    kind: Kind
+    machine: Machine
+    entry: u64
+    flags: u32
+    phoff: u64
+    phnum: u16
+    shoff: u64
+    shnum: u16
+    shstrndx: u16
+
+# A section header, with its name resolved.
+manual struct Section:
+    name: str
+    kind: SectionKind
+    flags: u64
+    addr: u64
+    offset: u64
+    size: u64
+    link: u32
+    info: u32
+    entsize: u64
+
+# A program header (segment).
+manual struct Segment:
+    kind: SegmentKind
+    flags: u32
+    offset: u64
+    vaddr: u64
+    paddr: u64
+    filesz: u64
+    memsz: u64
+    align: u64
+
+# A symbol, with its name resolved.
+manual struct Symbol:
+    name: str
+    value: u64
+    size: u64
+    bind: Bind
+    kind: SymbolType
+    shndx: u16
+
+# A parsed ELF. `symbols` come from `.symtab`, `dynamic_symbols` from `.dynsym`; either is empty
+# when its table is absent (a stripped binary has no `.symtab`, an object file no segments).
+manual struct Elf:
+    header: Header
+    sections: vector[Section]
+    segments: vector[Segment]
+    symbols: vector[Symbol]
+    dynamic_symbols: vector[Symbol]
+
+# A fatal parse problem: `at` the byte offset, `reason` what was wrong.
+manual struct ElfError:
+    at: size
+    reason: str
+
+priv manual fn to_kind(v: i64) -> Kind:
+    if v == 1:
+        return Kind.Rel
+    if v == 2:
+        return Kind.Exec
+    if v == 3:
+        return Kind.Dyn
+    if v == 4:
+        return Kind.Core
+    return Kind.Unknown(u16(v))
+
+priv manual fn to_machine(v: i64) -> Machine:
+    if v == 3:
+        return Machine.X86
+    if v == 62:
+        return Machine.X86_64
+    if v == 40:
+        return Machine.Arm
+    if v == 183:
+        return Machine.Aarch64
+    if v == 243:
+        return Machine.RiscV
+    return Machine.Unknown(u16(v))
+
+priv manual fn to_section_kind(v: i64) -> SectionKind:
+    if v == 0:
+        return SectionKind.Null
+    if v == 1:
+        return SectionKind.ProgBits
+    if v == 2:
+        return SectionKind.SymTab
+    if v == 3:
+        return SectionKind.StrTab
+    if v == 4:
+        return SectionKind.Rela
+    if v == 5:
+        return SectionKind.Hash
+    if v == 6:
+        return SectionKind.Dynamic
+    if v == 7:
+        return SectionKind.Note
+    if v == 8:
+        return SectionKind.NoBits
+    if v == 9:
+        return SectionKind.Rel
+    if v == 11:
+        return SectionKind.DynSym
+    if v == 14:
+        return SectionKind.InitArray
+    if v == 15:
+        return SectionKind.FiniArray
+    return SectionKind.Unknown(u32(v))
+
+priv manual fn to_segment_kind(v: i64) -> SegmentKind:
+    if v == 0:
+        return SegmentKind.Null
+    if v == 1:
+        return SegmentKind.Load
+    if v == 2:
+        return SegmentKind.Dynamic
+    if v == 3:
+        return SegmentKind.Interp
+    if v == 4:
+        return SegmentKind.Note
+    if v == 6:
+        return SegmentKind.Phdr
+    if v == 7:
+        return SegmentKind.Tls
+    if v == 1685382480:
+        return SegmentKind.GnuEhFrame
+    if v == 1685382481:
+        return SegmentKind.GnuStack
+    if v == 1685382482:
+        return SegmentKind.GnuRelro
+    return SegmentKind.Unknown(u32(v))
+
+priv manual fn to_bind(v: i64) -> Bind:
+    if v == 0:
+        return Bind.Local
+    if v == 1:
+        return Bind.Global
+    if v == 2:
+        return Bind.Weak
+    return Bind.Unknown(u8(v))
+
+priv manual fn to_symbol_type(v: i64) -> SymbolType:
+    if v == 0:
+        return SymbolType.NoType
+    if v == 1:
+        return SymbolType.Object
+    if v == 2:
+        return SymbolType.Func
+    if v == 3:
+        return SymbolType.Section
+    if v == 4:
+        return SymbolType.File
+    if v == 5:
+        return SymbolType.Common
+    if v == 6:
+        return SymbolType.Tls
+    return SymbolType.Unknown(u8(v))
+
+# The null-terminated string at `base + index`, or "" when out of range or not UTF-8.
+priv manual fn cstr(data: &vector[u8], base: size, index: size) -> str:
+    const start: size = base + index
+    if start >= len(data):
+        return ""
+    mut end: size = start
+    while end < len(data) and data[end] != 0:
+        end += 1
+    mut bytes: vector[u8] = []
+    for i in range(start, end):
+        bytes.push(data[i])
+    const text: Optional[str] = str.from_bytes(&bytes)
+    if text is None:
+        return ""
+    return text
+
+priv manual fn parse_segments(data: &vector[u8], bits: Width, order: Order, phoff: u64, phnum: u16, phentsize: i64) -> vector[Segment] raises BinaryError:
+    mut out: vector[Segment] = []
+    if phoff == 0 or phnum == 0:
+        return out
+    mut stride: size = size(phentsize)
+    if stride == 0:
+        if bits == Width.Bits64:
+            stride = 56
+        else:
+            stride = 32
+    mut i: size = 0
+    while i < size(phnum):
+        const base: size = size(phoff) + i * stride
+        const ptype: i64 = check read_u32(data, base, order)
+        mut pflags: i64 = 0
+        mut poff: u64 = 0
+        mut vaddr: u64 = 0
+        mut paddr: u64 = 0
+        mut filesz: u64 = 0
+        mut memsz: u64 = 0
+        mut align: u64 = 0
+        if bits == Width.Bits64:
+            pflags = check read_u32(data, base + 4, order)
+            poff = check read_u64(data, base + 8, order)
+            vaddr = check read_u64(data, base + 16, order)
+            paddr = check read_u64(data, base + 24, order)
+            filesz = check read_u64(data, base + 32, order)
+            memsz = check read_u64(data, base + 40, order)
+            align = check read_u64(data, base + 48, order)
+        else:
+            poff = u64(check read_u32(data, base + 4, order))
+            vaddr = u64(check read_u32(data, base + 8, order))
+            paddr = u64(check read_u32(data, base + 12, order))
+            filesz = u64(check read_u32(data, base + 16, order))
+            memsz = u64(check read_u32(data, base + 20, order))
+            pflags = check read_u32(data, base + 24, order)
+            align = u64(check read_u32(data, base + 28, order))
+        out.push(Segment(kind=to_segment_kind(ptype), flags=u32(pflags), offset=poff, vaddr=vaddr, paddr=paddr, filesz=filesz, memsz=memsz, align=align))
+        i += 1
+    return out
+
+priv manual fn parse_sections(data: &vector[u8], bits: Width, order: Order, shoff: u64, shnum: u16, shentsize: i64, shstrndx: u16) -> vector[Section] raises BinaryError:
+    mut out: vector[Section] = []
+    if shoff == 0 or shnum == 0:
+        return out
+    mut stride: size = size(shentsize)
+    if stride == 0:
+        if bits == Width.Bits64:
+            stride = 64
+        else:
+            stride = 40
+    mut names: vector[i64] = []
+    mut i: size = 0
+    while i < size(shnum):
+        const base: size = size(shoff) + i * stride
+        const nameidx: i64 = check read_u32(data, base, order)
+        const stype: i64 = check read_u32(data, base + 4, order)
+        mut flags: u64 = 0
+        mut addr: u64 = 0
+        mut off: u64 = 0
+        mut sz: u64 = 0
+        mut link: i64 = 0
+        mut info: i64 = 0
+        mut entsize: u64 = 0
+        if bits == Width.Bits64:
+            flags = check read_u64(data, base + 8, order)
+            addr = check read_u64(data, base + 16, order)
+            off = check read_u64(data, base + 24, order)
+            sz = check read_u64(data, base + 32, order)
+            link = check read_u32(data, base + 40, order)
+            info = check read_u32(data, base + 44, order)
+            entsize = check read_u64(data, base + 56, order)
+        else:
+            flags = u64(check read_u32(data, base + 8, order))
+            addr = u64(check read_u32(data, base + 12, order))
+            off = u64(check read_u32(data, base + 16, order))
+            sz = u64(check read_u32(data, base + 20, order))
+            link = check read_u32(data, base + 24, order)
+            info = check read_u32(data, base + 28, order)
+            entsize = u64(check read_u32(data, base + 36, order))
+        out.push(Section(name="", kind=to_section_kind(stype), flags=flags, addr=addr, offset=off, size=sz, link=u32(link), info=u32(info), entsize=entsize))
+        names.push(nameidx)
+        i += 1
+    const sidx: size = size(shstrndx)
+    if sidx < len(out):
+        const strbase: size = size(out[sidx].offset)
+        mut j: size = 0
+        while j < len(out):
+            out[j].name = cstr(data, strbase, size(names[j]))
+            j += 1
+    return out
+
+priv manual fn parse_symbols(data: &vector[u8], bits: Width, order: Order, sections: &vector[Section], owned want: SectionKind) -> vector[Symbol]:
+    mut out: vector[Symbol] = []
+    mut tab: size = len(sections)
+    mut k: size = 0
+    while k < len(sections):
+        if sections[k].kind == want:
+            tab = k
+        k += 1
+    if tab == len(sections):
+        return out
+    mut strbase: size = 0
+    const strsec: size = size(sections[tab].link)
+    if strsec < len(sections):
+        strbase = size(sections[strsec].offset)
+    const symbase: size = size(sections[tab].offset)
+    mut entsize: size = size(sections[tab].entsize)
+    if entsize == 0:
+        if bits == Width.Bits64:
+            entsize = 24
+        else:
+            entsize = 16
+    const count: size = size(sections[tab].size) // entsize
+    mut i: size = 0
+    while i < count:
+        const base: size = symbase + i * entsize
+        if base + entsize > len(data):
+            return out
+        mut nameidx: i64 = 0
+        mut info: i64 = 0
+        mut shndx: i64 = 0
+        mut value: u64 = 0
+        mut sz: u64 = 0
+        try:
+            nameidx = check read_u32(data, base, order)
+            if bits == Width.Bits64:
+                info = check read_u8(data, base + 4)
+                shndx = check read_u16(data, base + 6, order)
+                value = check read_u64(data, base + 8, order)
+                sz = check read_u64(data, base + 16, order)
+            else:
+                value = u64(check read_u32(data, base + 4, order))
+                sz = u64(check read_u32(data, base + 8, order))
+                info = check read_u8(data, base + 12)
+                shndx = check read_u16(data, base + 14, order)
+        except BinaryError as _e:
+            return out
+        const name: str = cstr(data, strbase, size(nameidx))
+        out.push(Symbol(name=name, value=value, size=sz, bind=to_bind(info // 16), kind=to_symbol_type(info % 16), shndx=u16(shndx)))
+        i += 1
+    return out
+
+priv manual fn parse_body(data: &vector[u8], bits: Width, order: Order) -> Elf raises BinaryError:
+    const kind_v: i64 = check read_u16(data, 16, order)
+    const machine_v: i64 = check read_u16(data, 18, order)
+    mut entry: u64 = 0
+    mut phoff: u64 = 0
+    mut shoff: u64 = 0
+    mut flags: i64 = 0
+    mut phentsize: i64 = 0
+    mut phnum: i64 = 0
+    mut shentsize: i64 = 0
+    mut shnum: i64 = 0
+    mut shstrndx: i64 = 0
+    if bits == Width.Bits64:
+        entry = check read_u64(data, 24, order)
+        phoff = check read_u64(data, 32, order)
+        shoff = check read_u64(data, 40, order)
+        flags = check read_u32(data, 48, order)
+        phentsize = check read_u16(data, 54, order)
+        phnum = check read_u16(data, 56, order)
+        shentsize = check read_u16(data, 58, order)
+        shnum = check read_u16(data, 60, order)
+        shstrndx = check read_u16(data, 62, order)
+    else:
+        entry = u64(check read_u32(data, 24, order))
+        phoff = u64(check read_u32(data, 28, order))
+        shoff = u64(check read_u32(data, 32, order))
+        flags = check read_u32(data, 36, order)
+        phentsize = check read_u16(data, 42, order)
+        phnum = check read_u16(data, 44, order)
+        shentsize = check read_u16(data, 46, order)
+        shnum = check read_u16(data, 48, order)
+        shstrndx = check read_u16(data, 50, order)
+    const header: Header = Header(bits=bits, data=order, kind=to_kind(kind_v), machine=to_machine(machine_v), entry=entry, flags=u32(flags), phoff=phoff, phnum=u16(phnum), shoff=shoff, shnum=u16(shnum), shstrndx=u16(shstrndx))
+    const segments: vector[Segment] = check parse_segments(data, bits, order, phoff, u16(phnum), phentsize)
+    const sections: vector[Section] = check parse_sections(data, bits, order, shoff, u16(shnum), shentsize, u16(shstrndx))
+    const symbols: vector[Symbol] = parse_symbols(data, bits, order, &sections, SectionKind.SymTab)
+    const dynamic: vector[Symbol] = parse_symbols(data, bits, order, &sections, SectionKind.DynSym)
+    return Elf(header=header, sections=sections, segments=segments, symbols=symbols, dynamic_symbols=dynamic)
+
+# Parses `data` into an `Elf`. Raises `ElfError` on a fatal problem (bad magic, a truncated
+# header, or a table pointing past the end of the data).
+manual fn parse(data: &vector[u8]) -> Elf raises ElfError:
+    if len(data) < 16:
+        raise ElfError(at=0, reason="too small for an ELF header")
+    if data[0] != 0x7f or data[1] != 0x45 or data[2] != 0x4c or data[3] != 0x46:
+        raise ElfError(at=0, reason="not an ELF file (bad magic)")
+    mut bits: Width = Width.Bits64
+    if data[4] == 1:
+        bits = Width.Bits32
+    elif data[4] == 2:
+        bits = Width.Bits64
+    else:
+        raise ElfError(at=4, reason="unknown ELF class")
+    mut order: Order = Order.Little
+    if data[5] == 1:
+        order = Order.Little
+    elif data[5] == 2:
+        order = Order.Big
+    else:
+        raise ElfError(at=5, reason="unknown ELF data encoding")
+    try:
+        return check parse_body(data, bits, order)
+    except BinaryError as e:
+        raise ElfError(at=e.at, reason=e.reason.copy())
