@@ -1,0 +1,19 @@
+from io import print
+
+# In `manual`, `<<` is a bitwise shift: bits past the top fall off, as they do in C. A hash
+# combiner leans on this.
+manual fn combine(a: u64, b: u64) -> u64:
+    return a ^ (b << 1)
+
+manual fn main():
+    # 255 << 60 drops its high bits rather than stopping the program.
+    mut a: i64 = 255
+    mut n: i64 = 60
+    print(f"{a << n}")
+    # A shift that stays in range is unchanged.
+    print(f"{1 << 10}")
+    # b's top bit falls off in `b << 1`, so it contributes nothing: 1 ^ 0 == 1.
+    print(f"{combine(1, 0x8000000000000000)}")
+# expect: -1152921504606846976
+# expect: 1024
+# expect: 1

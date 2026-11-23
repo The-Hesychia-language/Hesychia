@@ -1,4 +1,5 @@
-manual fn main():
+# In `managed`, a left shift that loses high bits is an overflow and stops the program.
+managed fn main():
     mut a: i64 = 255
     mut n: i64 = 60
-    mut b: i64 = a << n
+    mut _b: i64 = a << n
