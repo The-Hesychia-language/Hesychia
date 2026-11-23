@@ -310,7 +310,13 @@ impl Emitter<'_> {
     }
 
     fn emit_shift(&mut self, op: BinOp, t: IntTy, value: &str, amount: &str) -> String {
-        let helper = if op == BinOp::Shl { Helper::Shl(t) } else { Helper::Shr(t) };
+        // `<<` drops the bits that fall off the top in `manual`; in `managed` losing them is an
+        // overflow and stops the program. `>>` never overflows, so it is the same at both levels.
+        let helper = match op {
+            BinOp::Shl if self.fn_level == crate::ast::Level::Managed => Helper::Shl(t),
+            BinOp::Shl => Helper::ShlWrap(t),
+            _ => Helper::Shr(t),
+        };
         format!("{}({value}, (unsigned __int128)({amount}))", self.helpers.call(helper))
     }
 

@@ -17,7 +17,7 @@ mod types;
 
 use std::collections::{HashMap, HashSet};
 
-use crate::ast::{ExternFn, FnDecl, Item, Program, fn_c_name, method_c_name};
+use crate::ast::{ExternFn, FnDecl, Item, Level, Program, fn_c_name, method_c_name};
 use crate::typeck::{Checked, Signature};
 use crate::types::Type;
 use helpers::Helpers;
@@ -41,6 +41,7 @@ pub fn generate(program: &Program, checked: &Checked, options: &Options) -> Stri
         types: TypeRegistry::new(&checked.types, checked.panic_handler.clone()),
         scopes: Vec::new(),
         fn_ret: Type::Void,
+        fn_level: Level::Manual,
         fn_raises: Vec::new(),
         tries: Vec::new(),
         borrowed_match: Vec::new(),
@@ -66,9 +67,11 @@ struct Emitter<'a> {
     /// For each `match` being emitted, innermost last: whether it only borrows its subject.
     borrowed_match: Vec<bool>,
     signatures: &'a HashMap<String, Signature>,
-    /// The function being emitted: its return and error types.
+    /// The function being emitted: its return and error types, and its level. The level decides
+    /// whether `<<` is checked (`managed`, overflow stops the program) or wrapping (`manual`).
     fn_ret: Type,
     fn_raises: Vec<Type>,
+    fn_level: Level,
     /// The open `try` blocks, innermost last.
     tries: Vec<errors::TryFrame>,
     /// The C functions made for lambdas.
@@ -546,6 +549,7 @@ impl Emitter<'_> {
         let params = &sig.params;
         self.fn_ret = sig.ret.clone();
         self.fn_raises = sig.raises.clone();
+        self.fn_level = f.level;
         let mut names: Vec<&str> = f.params.iter().map(|p| p.name.as_str()).collect();
         if params.len() > names.len() {
             names.insert(0, "self");
