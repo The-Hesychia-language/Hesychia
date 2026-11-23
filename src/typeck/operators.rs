@@ -16,6 +16,7 @@ impl Checker<'_> {
         };
         match ty {
             Type::Struct(named) => self.tables.types.structs[named.id].operators.contains_key(method),
+            Type::Enum { named, .. } => self.tables.types.enums[named.id].operators.contains_key(method),
             // `v[i]` and `len(v)` are the compiler's; `in` and slices come from the prelude.
             Type::Str | Type::Vector(_) => {
                 matches!(method, "contains" | "slice") && self.extension(ty, method).is_some()

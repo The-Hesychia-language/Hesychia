@@ -358,6 +358,11 @@ impl Tables {
         {
             return true;
         }
+        if let Type::Enum { named, .. } = ty
+            && self.enum_impls.get(&named.id).is_some_and(|t| t.contains(&trait_id))
+        {
+            return true;
+        }
         if def.module.is_some() {
             return false;
         }
@@ -378,7 +383,7 @@ impl Tables {
         let (decl, module, params) = (decl.clone(), *module, params.clone());
         let name = display(&decl.name, &args);
         let plain = decl.variants.iter().all(|v| v.fields.is_empty());
-        self.types.enums.push(EnumDef { name, module, doc: decl.doc.clone(), plain, variants: Vec::new() });
+        self.types.enums.push(EnumDef { name, module, doc: decl.doc.clone(), plain, variants: Vec::new(), operators: HashMap::new() });
         let id = self.types.enums.len() - 1;
         self.templates.made.insert((Kind::Enum, template, args.clone()), id);
         let mut extra: Vec<(String, Type)> = params.into_iter().zip(args.iter().cloned()).collect();

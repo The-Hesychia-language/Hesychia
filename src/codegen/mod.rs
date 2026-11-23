@@ -413,24 +413,20 @@ impl Emitter<'_> {
         const IMPLICIT: [&str; 9] = ["add", "sub", "mul", "div", "mod", "equal", "compare", "show", "drop"];
         // Each such method, and the C name of its struct: it is written only once the rest
         // of the code uses that struct.
-        let waiting: HashMap<String, String> = self
-            .types
-            .table
-            .structs
-            .iter()
-            .enumerate()
-            .flat_map(|(id, s)| {
-                // As `TypeRegistry` names them: `Pair[i32]` by its template and id.
-                let owner = match s.name.split_once('[') {
-                    Some((base, _)) => format!("hsy_m{}_{base}__{id}", s.module),
-                    None => format!("hsy_m{}_{}", s.module, s.name),
-                };
-                s.operators
-                    .iter()
-                    .filter(|(m, _)| IMPLICIT.contains(&m.as_str()))
-                    .map(move |(_, c)| (c.clone(), owner.clone()))
-            })
-            .collect();
+        // As `TypeRegistry` names them: `Pair[i32]` by its template and id.
+        let owner_of = |module: usize, name: &str, id: usize| match name.split_once('[') {
+            Some((base, _)) => format!("hsy_m{module}_{base}__{id}"),
+            None => format!("hsy_m{module}_{name}"),
+        };
+        let struct_ops = self.types.table.structs.iter().enumerate().flat_map(|(id, s)| {
+            let owner = owner_of(s.module, &s.name, id);
+            s.operators.iter().filter(|(m, _)| IMPLICIT.contains(&m.as_str())).map(move |(_, c)| (c.clone(), owner.clone()))
+        });
+        let enum_ops = self.types.table.enums.iter().enumerate().flat_map(|(id, e)| {
+            let owner = owner_of(e.module, &e.name, id);
+            e.operators.iter().filter(|(m, _)| IMPLICIT.contains(&m.as_str())).map(move |(_, c)| (c.clone(), owner.clone()))
+        });
+        let waiting: HashMap<String, String> = struct_ops.chain(enum_ops).collect();
         let mut roots: Vec<String> = waiting.keys().cloned().collect();
         roots.extend(self.types.panic_handler.clone());
         // Everything any of them may need: the externs and module constants to declare.
@@ -641,6 +637,10 @@ fn functions<'p>(program: &'p Program, used: &HashSet<String>) -> Vec<(String, &
                 Item::Struct(s) if s.generics.is_empty() => {
                     let methods = s.methods.iter().filter(|m| m.generics.is_empty());
                     out.extend(methods.map(|m| (method_c_name(index, &s.name, &m.name), m)));
+                }
+                Item::Enum(e) if e.generics.is_empty() => {
+                    let methods = e.methods.iter().filter(|m| m.generics.is_empty());
+                    out.extend(methods.map(|m| (method_c_name(index, &e.name, &m.name), m)));
                 }
                 _ => {}
             }

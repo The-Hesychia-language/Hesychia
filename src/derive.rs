@@ -4,7 +4,7 @@
 //! through the same checks as any hand-written method — a field whose type lacks the trait is
 //! reported there.
 
-use crate::ast::{Decorator, EnumDecl, ExprKind, FieldDecl, FnDecl, Item, Level, Program, StructDecl};
+use crate::ast::{Decorator, EnumDecl, ExprKind, FieldDecl, FnDecl, Item, Level, Program, StructDecl, VariantDecl};
 use crate::diag::{Diagnostic, Result, SourceMap, Span};
 use crate::{lexer, parser};
 
@@ -86,13 +86,21 @@ fn expand_struct(s: &mut StructDecl, sources: &mut SourceMap) -> Result<()> {
     Ok(())
 }
 
-fn expand_enum(e: &EnumDecl, _sources: &mut SourceMap) -> Result<()> {
-    // Enums carry no methods yet, so they cannot implement a trait at all; deriving one needs that
-    // foundation first. Reject it clearly rather than silently doing nothing.
+fn expand_enum(e: &mut EnumDecl, sources: &mut SourceMap) -> Result<()> {
     let want = wanted(&e.decorators)?;
-    if let Some((_, span)) = want.first() {
-        return Err(Diagnostic::error(*span, "`@derive` on an enum is not supported yet (enums cannot carry methods)"));
+    guard(e.level, !e.generics.is_empty(), &e.traits, &e.name, &want)?;
+    let mut body = String::new();
+    for (trait_name, span) in &want {
+        body += &match trait_name.as_str() {
+            "Equal" => enum_equal(&e.name, &e.variants),
+            "Order" => enum_order(&e.name, &e.variants),
+            "Hash" => enum_hash(&e.name, &e.variants),
+            _ => enum_show(&e.name, &e.variants),
+        };
+        e.traits.push((trait_name.clone(), *span));
     }
+    e.methods.extend(parse_methods(&e.name, body, sources)?);
+    e.decorators.retain(|d| d.name != "derive");
     Ok(())
 }
 
@@ -136,6 +144,102 @@ fn struct_show(name: &str, fields: &[FieldDecl]) -> String {
         format!("{name}({inside})")
     };
     format!("    method show(&self) -> str:\n        return f\"{text}\"\n")
+}
+
+// ----- enum generators -----
+
+/// `Name.Variant` or `Name.Variant(b0, b1)`, binding each field to `prefix` + its name.
+fn bound(name: &str, v: &VariantDecl, prefix: &str) -> String {
+    if v.fields.is_empty() {
+        return format!("{name}.{}", v.name);
+    }
+    let binds = v.fields.iter().map(|f| format!("{prefix}{}", f.name)).collect::<Vec<_>>().join(", ");
+    format!("{name}.{}({binds})", v.name)
+}
+
+/// `Name.Variant` or `Name.Variant(_, _)`: matches the variant, ignoring any fields.
+fn ignored(name: &str, v: &VariantDecl) -> String {
+    if v.fields.is_empty() {
+        return format!("{name}.{}", v.name);
+    }
+    let holes = vec!["_"; v.fields.len()].join(", ");
+    format!("{name}.{}({holes})", v.name)
+}
+
+fn enum_equal(name: &str, variants: &[VariantDecl]) -> String {
+    let mut arms = String::new();
+    for v in variants {
+        let inner = if v.fields.is_empty() {
+            "                        return True\n".to_string()
+        } else {
+            let cond = v.fields.iter().map(|f| format!("{0} == o_{0}", f.name)).collect::<Vec<_>>().join(" and ");
+            format!("                        return {cond}\n")
+        };
+        arms += &format!(
+            "            case {}:\n                match other:\n                    case {}:\n{inner}                    case _:\n                        return False\n",
+            bound(name, v, ""),
+            bound(name, v, "o_"),
+        );
+    }
+    format!("    method equal(&self, other: &{name}) -> bool:\n        match self:\n{arms}")
+}
+
+fn enum_hash(name: &str, variants: &[VariantDecl]) -> String {
+    let mut arms = String::new();
+    for (i, v) in variants.iter().enumerate() {
+        // Fields are bound with an `f_` prefix so they never clash with the `acc` accumulator.
+        let mut b = format!("                mut acc: u64 = {SEED}\n                acc = (acc ^ u64({i})).wrapping_mul({PRIME})\n");
+        for f in &v.fields {
+            b += &format!("                acc = (acc ^ f_{0}.hash()).wrapping_mul({PRIME})\n", f.name);
+        }
+        b += "                return acc\n";
+        arms += &format!("            case {}:\n{b}", bound(name, v, "f_"));
+    }
+    format!("    method hash(&self) -> u64:\n        match self:\n{arms}")
+}
+
+fn enum_show(name: &str, variants: &[VariantDecl]) -> String {
+    let mut arms = String::new();
+    for v in variants {
+        let text = if v.fields.is_empty() {
+            format!("\"{name}.{}\"", v.name)
+        } else {
+            let inside = v.fields.iter().map(|f| format!("{0}={{{0}}}", f.name)).collect::<Vec<_>>().join(", ");
+            format!("f\"{name}.{}({inside})\"", v.name)
+        };
+        arms += &format!("            case {}:\n                return {text}\n", bound(name, v, ""));
+    }
+    format!("    method show(&self) -> str:\n        match self:\n{arms}")
+}
+
+/// Orders by variant first (declaration order), then by fields within the same variant.
+fn enum_order(name: &str, variants: &[VariantDecl]) -> String {
+    let mut arms = String::new();
+    for (i, vi) in variants.iter().enumerate() {
+        let mut inner = String::new();
+        for (j, vj) in variants.iter().enumerate() {
+            let body = if i < j {
+                "                        return -1\n".to_string()
+            } else if i > j {
+                "                        return 1\n".to_string()
+            } else {
+                let mut cmp = String::new();
+                for f in &vi.fields {
+                    cmp += &format!(
+                        "                        if {0} < o_{0}:\n                            return -1\n                        if {0} > o_{0}:\n                            return 1\n",
+                        f.name
+                    );
+                }
+                cmp += "                        return 0\n";
+                cmp
+            };
+            // The same variant binds both sides; the others are ignored on the `other` side.
+            let other_pat = if i == j { bound(name, vj, "o_") } else { ignored(name, vj) };
+            inner += &format!("                    case {other_pat}:\n{body}");
+        }
+        arms += &format!("            case {}:\n                match other:\n{inner}", bound(name, vi, ""));
+    }
+    format!("    method compare(&self, other: &{name}) -> i32:\n        match self:\n{arms}")
 }
 
 /// Wraps the generated method bodies in a throwaway struct, parses it, and hands back its methods.

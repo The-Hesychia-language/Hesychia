@@ -451,7 +451,11 @@ impl Checker<'_> {
         }
         if let Type::Struct(named) = &ty {
             let id = named.id;
-            return self.check_bound_call(expr, id);
+            return self.check_bound_call(expr, id, false);
+        }
+        if let Type::Enum { named, .. } = &ty {
+            let id = named.id;
+            return self.check_bound_call(expr, id, true);
         }
         if !super::builtin::has_builtin_method(&ty, name)
             && let Some(function) = self.extension(&ty, name)
@@ -538,7 +542,7 @@ impl Checker<'_> {
     pub(super) fn check_static_call(&mut self, expr: &mut Expr, id: usize) -> Result<Type> {
         let span = expr.span;
         let ExprKind::Method { name, args, .. } = &mut expr.kind else { unreachable!("called on a method") };
-        let index = self.method(id, name, span)?;
+        let index = self.method(id, name, span, false)?;
         if self.tables.fns[index].receiver.is_some() {
             return Err(Diagnostic::error(span, format!("`{name}` takes `self`; call it on a value")));
         }
@@ -632,14 +636,18 @@ impl Checker<'_> {
     }
 
     /// `x.name(...)`: the checked receiver becomes the first argument, borrowed as the method asks.
-    fn check_bound_call(&mut self, expr: &mut Expr, id: usize) -> Result<Type> {
+    fn check_bound_call(&mut self, expr: &mut Expr, id: usize, is_enum: bool) -> Result<Type> {
         let span = expr.span;
         let ExprKind::Method { receiver, name, .. } = &mut expr.kind else {
             unreachable!("called on a method")
         };
-        let index = self.method(id, name, span)?;
-        let type_name = self.tables.types.structs[id].name.clone();
-        if name == "drop" && self.tables.types.structs[id].drop_method().is_some() {
+        let index = self.method(id, name, span, is_enum)?;
+        let type_name = if is_enum {
+            self.tables.types.enums[id].name.clone()
+        } else {
+            self.tables.types.structs[id].name.clone()
+        };
+        if !is_enum && name == "drop" && self.tables.types.structs[id].drop_method().is_some() {
             return Err(Diagnostic::error(
                 span,
                 format!("`drop` runs by itself when a `{type_name}` goes away"),
@@ -703,15 +711,16 @@ impl Checker<'_> {
         })
     }
 
-    fn method(&self, id: usize, name: &str, span: Span) -> Result<usize> {
-        let def = &self.tables.types.structs[id];
-        let index = self
-            .tables
-            .methods
+    fn method(&self, id: usize, name: &str, span: Span, is_enum: bool) -> Result<usize> {
+        let (table, type_name) = if is_enum {
+            (&self.tables.enum_methods, &self.tables.types.enums[id].name)
+        } else {
+            (&self.tables.methods, &self.tables.types.structs[id].name)
+        };
+        table
             .get(&(id, name.to_string()))
             .copied()
-            .ok_or_else(|| Diagnostic::error(span, format!("`{}` has no method `{name}`", def.name)))?;
-        Ok(index)
+            .ok_or_else(|| Diagnostic::error(span, format!("`{type_name}` has no method `{name}`")))
     }
 
     /// The type a receiver names, as `Point` or `geometry.Point`, unless a variable hides it.

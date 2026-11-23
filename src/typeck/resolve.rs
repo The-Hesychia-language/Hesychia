@@ -104,6 +104,10 @@ pub(super) struct Tables {
     pub impls: HashMap<usize, Vec<usize>>,
     /// Methods of each struct, by struct id then name.
     pub methods: HashMap<(usize, String), usize>,
+    /// The traits each enum implements, by enum id (a separate id space from structs).
+    pub enum_impls: HashMap<usize, Vec<usize>>,
+    /// Methods of each enum, by enum id then name.
+    pub enum_methods: HashMap<(usize, String), usize>,
     pub exports: Vec<HashMap<String, Export>>,
     namespaces: Vec<HashMap<String, Symbol>>,
     pub module_paths: Vec<String>,
@@ -503,10 +507,19 @@ impl Collector<'_> {
                     })
                     .collect();
                 let doc = e.doc.clone();
-                let def = EnumDef { name: e.name.clone(), module: self.module, doc, plain, variants };
+                let def = EnumDef { name: e.name.clone(), module: self.module, doc, plain, variants, operators: HashMap::new() };
                 self.tables.types.enums.push(def);
-                let symbol = Symbol::Enum(self.tables.types.enums.len() - 1);
-                self.export(&e.name, symbol, e.private, e.span)
+                let id = self.tables.types.enums.len() - 1;
+                for method in &e.methods {
+                    let index = self.placeholder_fn();
+                    if self.tables.enum_methods.insert((id, method.name.clone()), index).is_some() {
+                        return Err(Diagnostic::error(
+                            method.span,
+                            format!("method `{}` is defined twice", method.name),
+                        ));
+                    }
+                }
+                self.export(&e.name, Symbol::Enum(id), e.private, e.span)
             }
             Item::Global(g) => {
                 self.tables.globals.push(Global {
@@ -734,12 +747,24 @@ impl Signer<'_> {
         }
         self.tables.types.structs[id].fields = fields;
         let owner = Type::Struct(Named { id, name: s.name.clone() });
-        for method in &s.methods {
-            let index = self.tables.methods[&(id, method.name.clone())];
-            let c_name = method_c_name(self.module, &s.name, &method.name);
+        self.sign_methods(&s.methods, &s.name, &owner, id, false)?;
+        self.self_type = None;
+        Ok(())
+    }
+
+    /// Signs the methods of a struct or enum; `is_enum` picks which method table to read the
+    /// reserved slots from, since structs and enums have separate id spaces.
+    fn sign_methods(&mut self, methods: &[FnDecl], name: &str, owner: &Type, id: usize, is_enum: bool) -> Result<()> {
+        for method in methods {
+            let index = if is_enum {
+                self.tables.enum_methods[&(id, method.name.clone())]
+            } else {
+                self.tables.methods[&(id, method.name.clone())]
+            };
+            let c_name = method_c_name(self.module, name, &method.name);
             let generics = self.generics(method)?;
             self.type_params = generics.iter().map(|(n, _)| (n.clone(), Type::Param(n.clone()))).collect();
-            let sig = self.signature(method, c_name, Some(&owner));
+            let sig = self.signature(method, c_name, Some(owner));
             self.type_params.clear();
             if !generics.is_empty() {
                 let entry = super::templates::GenericMethod {
@@ -757,7 +782,6 @@ impl Signer<'_> {
             }
             self.tables.fns[index] = sig;
         }
-        self.self_type = None;
         Ok(())
     }
 
@@ -778,6 +802,10 @@ impl Signer<'_> {
             variants.push(VariantDef { name: variant.name.clone(), fields, doc: variant.doc.clone() });
         }
         self.tables.types.enums[id].variants = variants;
+        let owner = Type::Enum { named: Named { id, name: e.name.clone() }, plain: e.variants.iter().all(|v| v.fields.is_empty()) };
+        self.self_type = Some(owner.clone());
+        self.sign_methods(&e.methods, &e.name, &owner, id, true)?;
+        self.self_type = None;
         Ok(())
     }
 

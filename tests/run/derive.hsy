@@ -11,21 +11,37 @@ manual struct Point:
     label: str
     inner: Inner
 
+# Enums derive the same four; ordering ranks by variant (declaration order) then by fields.
+@derive(Equal, Order, Hash, Show)
+manual enum Token:
+    End
+    Number(value: i64)
+    Word(text: str)
+
 manual fn main():
     const a: Point = Point(x=1, label="a", inner=Inner(v=3))
     const same: Point = Point(x=1, label="a", inner=Inner(v=3))
     const bigger: Point = Point(x=1, label="a", inner=Inner(v=9))
-    # Show, including the nested struct.
     print(f"{a}")
-    # Equal.
     print(f"{a == same} {a == bigger}")
-    # Order: fields compared in declaration order, so the inner `v` breaks the tie.
     print(f"{a < bigger} {bigger < a}")
-    # Hash + Equal let a derived struct be a dict key.
     mut seen: dict[Point, i32] = dict[Point, i32]()
     seen[a] = 7
     print(f"{seen[same]}")
+
+    const n: Token = Token.Number(value=7)
+    const end: Token = Token.End
+    const w: Token = Token.Word(text="hi")
+    print(f"{n} {end}")
+    print(f"{n == Token.Number(value=7)} {end < n} {n < w}")
+    mut kinds: dict[Token, i32] = dict[Token, i32]()
+    kinds[Token.Number(value=7)] = 1
+    const probe: Token = Token.Number(value=7)
+    print(f"{kinds[probe]}")
 # expect: Point(x=1, label=a, inner=Inner(v=3))
 # expect: True False
 # expect: True False
 # expect: 7
+# expect: Token.Number(value=7) Token.End
+# expect: True True True
+# expect: 1

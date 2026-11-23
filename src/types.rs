@@ -415,6 +415,8 @@ pub struct EnumDef {
     /// No variant carries data: known from the declaration, before the variants' types.
     pub plain: bool,
     pub variants: Vec<VariantDef>,
+    /// C names of the methods implementing built-in traits (`equal`, `hash`, `compare`, ...).
+    pub operators: std::collections::HashMap<String, String>,
 }
 
 /// The user-defined types of a program, indexed by `Named::id`.

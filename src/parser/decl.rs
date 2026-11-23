@@ -95,9 +95,18 @@ impl Parser {
     pub(super) fn parse_enum(&mut self, level: Level, private: bool, span: Span) -> Result<EnumDecl> {
         let name = self.expect_ident()?;
         let generics = self.parse_generics()?;
-        let mut variants = Vec::new();
+        let traits = self.parse_trait_list()?;
+        if level == Level::Managed && !traits.is_empty() {
+            return Err(Diagnostic::error(span, "`managed` enums do not implement traits")
+                .with_hint("declare a `manual enum` to implement traits"));
+        }
+        let (mut variants, mut methods) = (Vec::new(), Vec::new());
         self.open_body()?;
         while !self.eat(&Tok::Dedent) {
+            if self.at(&Tok::Kw(Kw::Method)) || self.at_private_method() {
+                methods.push(self.parse_method(level)?);
+                continue;
+            }
             let span = self.span();
             let doc = self.doc();
             let name = self.expect_ident()?;
@@ -113,7 +122,7 @@ impl Parser {
             self.expect_newline()?;
             variants.push(VariantDecl { name, fields, doc, span });
         }
-        Ok(EnumDecl { level, private, name, generics, variants, decorators: Vec::new(), doc: String::new(), span })
+        Ok(EnumDecl { level, private, name, generics, traits, variants, methods, decorators: Vec::new(), doc: String::new(), span })
     }
 
     fn open_body(&mut self) -> Result<()> {

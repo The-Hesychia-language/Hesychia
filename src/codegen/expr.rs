@@ -164,9 +164,14 @@ impl Emitter<'_> {
         let negate = op == BinOp::Ne;
         let (call, result) = match (op, &ty) {
             (BinOp::Eq | BinOp::Ne, _) => (self.types.eq_fn(&ty), "bool".to_string()),
-            // `<` and the like on a struct with `Order`: the sign of `compare`.
+            // `<` and the like on a struct or enum with `Order`: the sign of `compare`.
             (BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge, Type::Struct(named)) => {
                 let call = self.types.table.structs[named.id].operators["compare"].clone();
+                let code = self.emit_operand_call(&call, left, right, "int32_t");
+                return Some(format!("({code} {} 0)", op.symbol()));
+            }
+            (BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge, Type::Enum { named, .. }) => {
+                let call = self.types.table.enums[named.id].operators["compare"].clone();
                 let code = self.emit_operand_call(&call, left, right, "int32_t");
                 return Some(format!("({code} {} 0)", op.symbol()));
             }
