@@ -113,7 +113,7 @@ impl Parser {
             self.expect_newline()?;
             variants.push(VariantDecl { name, fields, doc, span });
         }
-        Ok(EnumDecl { level, private, name, generics, variants, doc: String::new(), span })
+        Ok(EnumDecl { level, private, name, generics, variants, decorators: Vec::new(), doc: String::new(), span })
     }
 
     fn open_body(&mut self) -> Result<()> {

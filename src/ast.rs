@@ -222,6 +222,8 @@ pub struct EnumDecl {
     pub name: String,
     pub generics: Vec<GenericParam>,
     pub variants: Vec<VariantDecl>,
+    /// `@derive(...)` and any other decorators written above the enum.
+    pub decorators: Vec<Decorator>,
     /// The comment above the enum.
     pub doc: String,
     pub span: Span,
