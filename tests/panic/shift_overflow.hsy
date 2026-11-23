@@ -1,0 +1,4 @@
+manual fn main():
+    mut a: i64 = 255
+    mut n: i64 = 60
+    mut b: i64 = a << n

@@ -74,7 +74,7 @@ fn definition(helper: Helper) -> String {
         Helper::Neg(t) => negation(&fname, t),
         Helper::Pow(t) => power(&fname, t),
         Helper::RangeNext(t) => range_next(&fname, t),
-        Helper::Shl(t) => shift(&fname, t, &format!("({})(({})a << n)", t.c_name(), t.unsigned().c_name())),
+        Helper::Shl(t) => left_shift(&fname, t),
         Helper::Shr(t) => shift(&fname, t, &format!("({})(a >> n)", t.c_name())),
         Helper::IntToInt(from, to) => int_to_int(&fname, from, to),
         Helper::FloatToInt(from, to) => float_to_int(&fname, from, to),
@@ -157,6 +157,22 @@ fn modulo(name: &str, t: IntTy) -> String {
 fn shift(name: &str, t: IntTy, result: &str) -> String {
     let body = format!("if (n >= {}) hsy_panic();\n    return {result};", t.bits());
     function(name, t.c_name(), &format!("{} a, unsigned __int128 n", t.c_name()), &body)
+}
+
+/// Left shift that stops the program when a bit is lost, like every other overflow: the result
+/// must shift back to the original value. The shift is done on the unsigned type, where dropping
+/// high bits is defined; the check `r >> n == a` catches a value that no longer fits.
+fn left_shift(name: &str, t: IntTy) -> String {
+    let c = t.c_name();
+    let u = t.unsigned().c_name();
+    let body = format!(
+        "if (n >= {bits}) hsy_panic();\n    \
+         {c} r = ({c})(({u})a << n);\n    \
+         if (r >> n != a) hsy_panic();\n    \
+         return r;",
+        bits = t.bits()
+    );
+    function(name, c, &format!("{c} a, unsigned __int128 n"), &body)
 }
 
 /// Stops the program when the truncated value does not fit, including NaN.

@@ -435,9 +435,7 @@ impl Tables {
         }
         for p in &method.params {
             let ty = self.resolve_mut(module, &p.ty, extra)?;
-            if !ty.is_copy() && !p.owned {
-                return Err(Diagnostic::error(p.span, format!("`{}` must be borrowed or owned", p.name)));
-            }
+            super::check_binding_mode(p, &ty)?;
             if p.default.is_some() {
                 return Err(Diagnostic::error(
                     p.span,

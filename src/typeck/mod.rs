@@ -100,6 +100,17 @@ pub fn operator_method(op: crate::ast::BinOp) -> Option<&'static str> {
     expr::operator_trait(op).map(|(_, method)| method)
 }
 
+/// A parameter whose type is not `Copy` must be taken by reference or `owned`; declaring it as a
+/// plain value is an error. Shared by every site that type-checks a parameter's binding mode
+/// (functions, methods, lambdas, nested and generic ones).
+pub(super) fn check_binding_mode(p: &crate::ast::Param, ty: &Type) -> Result<()> {
+    if !ty.is_copy() && !p.owned {
+        return Err(Diagnostic::error(p.span, format!("`{}` must be borrowed or owned", p.name))
+            .with_hint(format!("write `{0}: &{1}`, `{0}: &mut {1}` or `owned {0}: {1}`", p.name, ty)));
+    }
+    Ok(())
+}
+
 /// A scalar type written by name, such as `i32` or `bool`.
 fn scalar_type(texpr: &TypeExpr) -> Option<Type> {
     match texpr {

@@ -27,10 +27,7 @@ impl Checker<'_> {
         let mut params = Vec::new();
         for p in &decl.params {
             let ty = self.resolve(&p.ty)?;
-            if !ty.is_copy() && !p.owned {
-                return Err(Diagnostic::error(p.span, format!("`{}` must be borrowed or owned", p.name))
-                    .with_hint(format!("write `{0}: &{1}` or `owned {0}: {1}`", p.name, ty)));
-            }
+            super::check_binding_mode(p, &ty)?;
             if p.default.is_some() {
                 return Err(Diagnostic::error(p.span, "a nested function takes no default values"));
             }

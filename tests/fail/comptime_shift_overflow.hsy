@@ -1,0 +1,7 @@
+# A left shift that overflows the compile-time `i128` must stop the build, not fold to a
+# silently wrong value: `255 << 120` loses its high bits, and `>> 120` would read back -1.
+comptime BIG: i64 = 255 << 120 >> 120
+
+manual fn main():
+    pass
+# error: this compile-time computation overflows
