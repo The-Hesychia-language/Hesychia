@@ -159,7 +159,18 @@ manual enum Side:
     Start
     End
 
+# Spreads a 64-bit value so close inputs land far apart; shared with the scalar `hash` builtins.
+@symbol("hsy_hash64")
+priv extern fn hash_finish(x: u64) -> u64
+
 extend str:
+    # FNV-1a over the bytes, then the shared finisher, matching the scalar hashes.
+    method hash(&self) -> u64:
+        mut h: u64 = 14695981039346656037
+        for i in range(byte_len(self)):
+            h = (h ^ u64(self.byte(i))).wrapping_mul(1099511628211)
+        return hash_finish(h)
+
     method starts_with(&self, prefix: &str) -> bool:
         if byte_len(prefix) > byte_len(self):
             return False

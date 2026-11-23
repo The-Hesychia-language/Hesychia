@@ -66,13 +66,6 @@ HSY_UNUSED static size_t hsy_str_chars(const hsy_str* s) {
     return n;
 }
 
-/* FNV-1a over the bytes, then spread like the other hashes. */
-HSY_UNUSED static uint64_t hsy_str_hash(const hsy_str* s) {
-    uint64_t h = 0xcbf29ce484222325u;
-    for (size_t i = 0; i < s->len; i++) h = (h ^ (uint8_t)s->data[i]) * 0x100000001b3u;
-    return hsy_hash64(h);
-}
-
 /* Byte order, which is also the order of code points in UTF-8. */
 HSY_UNUSED static int hsy_str_cmp(const hsy_str* a, const hsy_str* b) {
     size_t n = a->len < b->len ? a->len : b->len;

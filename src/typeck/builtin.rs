@@ -355,7 +355,7 @@ impl Checker<'_> {
         let receiver = match (&receiver.kind, sig.op) {
             // A literal's characters live in the program itself.
             (ExprKind::Str(_), Builtin::StrToC | Builtin::StrLen) => receiver,
-            (ExprKind::Str(_), Builtin::Hash | Builtin::StrByte) => borrow(receiver, false),
+            (ExprKind::Str(_), Builtin::StrByte) => borrow(receiver, false),
             // A number owns nothing: a temporary one, `(a ^ b).wrapping_mul(c)`, is lent too.
             _ if !sig.mutates && receiver.ty().is_numeric() && self.place_of(&receiver).is_none() => {
                 borrow(receiver, false)
@@ -409,7 +409,9 @@ fn method_sig(ty: &Type, name: &str) -> Option<MethodSig> {
             };
             sig(op, false, vec![ty.clone()], ty.clone())
         }
-        (Type::Int(_) | Type::Bool | Type::Char | Type::Str, "hash") => {
+        // `str.hash` is written in Hesychia (`extend str` in the prelude); only the scalar
+        // hashes stay builtins, since they just mix the value's bits.
+        (Type::Int(_) | Type::Bool | Type::Char, "hash") => {
             sig(Builtin::Hash, false, vec![], Type::Int(IntTy::U64))
         }
         (Type::Str, "byte") => sig(Builtin::StrByte, false, vec![size.clone()], Type::Int(IntTy::U8)),

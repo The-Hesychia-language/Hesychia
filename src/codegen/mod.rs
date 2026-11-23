@@ -390,8 +390,8 @@ int hsy_system_bytes(uint8_t* out, size_t n) {
 }
 #endif
 
-/* splitmix64: spreads the bits of a value, for `hash()`. */
-HSY_UNUSED static uint64_t hsy_hash64(uint64_t x) {
+/* splitmix64: spreads the bits of a value, for `hash()`; the prelude's `str.hash` calls it too. */
+uint64_t hsy_hash64(uint64_t x) {
     x += 0x9e3779b97f4a7c15u;
     x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9u;
     x = (x ^ (x >> 27)) * 0x94d049bb133111ebu;
