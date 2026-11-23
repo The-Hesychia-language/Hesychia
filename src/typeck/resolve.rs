@@ -946,9 +946,8 @@ impl Signer<'_> {
 
     fn param(&mut self, p: &Param, level: Level) -> Result<ParamSig> {
         let ty = self.ty(&p.ty)?;
-        if level == Level::Manual && !ty.is_copy() && !p.owned {
-            return Err(Diagnostic::error(p.span, format!("`{}` must be borrowed or owned", p.name))
-                .with_hint(format!("write `{0}: &{1}`, `{0}: &mut {1}` or `owned {0}: {1}`", p.name, ty)));
+        if level == Level::Manual {
+            super::check_binding_mode(p, &ty)?;
         }
         let default = match &p.default {
             Some(expr) => {

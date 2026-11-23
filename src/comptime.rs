@@ -228,7 +228,11 @@ fn int_binary(op: BinOp, a: i128, b: i128, span: Span) -> Result<Value> {
         BinOp::Div | BinOp::FloorDiv => a.checked_div(b),
         BinOp::Mod => a.checked_rem(b),
         BinOp::Pow => u32::try_from(b).ok().and_then(|exp| a.checked_pow(exp)),
-        BinOp::Shl => u32::try_from(b).ok().and_then(|n| a.checked_shl(n)),
+        // `checked_shl` only rejects a shift wider than the type; it does not notice when the
+        // value itself overflows (it keeps the low 128 bits). `r >> n == a` holds only when no
+        // bit was lost, so a left shift that overflows `i128` is reported like any other
+        // overflow instead of folding to a silently wrong value.
+        BinOp::Shl => u32::try_from(b).ok().and_then(|n| a.checked_shl(n).filter(|r| r >> n == a)),
         BinOp::Shr => u32::try_from(b).ok().and_then(|n| a.checked_shr(n)),
         BinOp::BitAnd => Some(a & b),
         BinOp::BitOr => Some(a | b),
