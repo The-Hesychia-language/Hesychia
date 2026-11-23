@@ -24,8 +24,11 @@ const MODULES: &[(&str, &str)] = &[
     ("elf", include_str!("../stdlib/elf.hsy")),
     // OffSec: tools for security work, shipped with the compiler like the rest.
     ("offsec.cyclic", include_str!("../stdlib/offsec/cyclic.hsy")),
+    ("offsec.encode", include_str!("../stdlib/offsec/encode.hsy")),
+    ("offsec.fmt", include_str!("../stdlib/offsec/fmt.hsy")),
     ("offsec.payload", include_str!("../stdlib/offsec/payload.hsy")),
     ("offsec.rop", include_str!("../stdlib/offsec/rop.hsy")),
+    ("offsec.shellcode", include_str!("../stdlib/offsec/shellcode.hsy")),
     ("offsec.tube", include_str!("../stdlib/offsec/tube.hsy")),
 ];
 

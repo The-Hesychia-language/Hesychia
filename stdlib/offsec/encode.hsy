@@ -1,0 +1,27 @@
+# offsec.encode: reversible byte encodings for payloads — dodge bad bytes, light obfuscation.
+#
+#     const enc: vector[u8] = encode.xor(&data, &key)   # xor again with the same key to decode
+#
+# `xor` repeats `key` over `data`. It is its own inverse, so the same call decodes. Pick a key
+# whose result avoids the bytes a target rejects (a null, a newline), and have the stub xor it
+# back at runtime. `has_byte` checks whether a result still contains a byte you need to avoid.
+
+# `data` xored with `key`, repeating `key` as needed. An empty key copies `data` unchanged.
+manual fn xor(data: &vector[u8], key: &vector[u8]) -> vector[u8]:
+    mut out: vector[u8] = []
+    if len(key) == 0:
+        for b in data:
+            out.push(b)
+        return out
+    mut i: size = 0
+    while i < len(data):
+        out.push(data[i] ^ key[i % len(key)])
+        i += 1
+    return out
+
+# Whether `data` contains `byte` — to check an encoded payload for a byte the target rejects.
+manual fn has_byte(data: &vector[u8], byte: u8) -> bool:
+    for b in data:
+        if b == byte:
+            return True
+    return False
