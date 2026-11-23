@@ -1,0 +1,85 @@
+from io import print
+from binary import Width
+from offsec.shellcode import sh
+from offsec.encode import xor, has_byte
+from offsec.fmt import write
+
+managed fn read_le(data: vector[u8], base: size, slot: size) -> u64:
+    v = u64(0)
+    w = 0
+    while w < slot:
+        v = v | (u64(data[base + w]) << u64(8 * w))
+        w += 1
+    return v
+
+# A small glibc-style interpreter of a fmt.write payload: counts printed chars and applies the
+# %hhn writes to a mock memory, so the test checks the write lands without a real vulnerable program.
+managed fn simulate(payload: vector[u8], offset: size, slot: size) -> dict[u64, i64]:
+    mem = dict[u64, i64]()
+    count = 0
+    i = 0
+    while i < len(payload):
+        c = payload[i]
+        if c == u8(0x25):
+            i += 1
+            num = 0
+            while i < len(payload) and payload[i] >= u8(0x30) and payload[i] <= u8(0x39):
+                num = num * 10 + i64(payload[i]) - 48
+                i += 1
+            if i < len(payload) and payload[i] == u8(0x63):
+                count += num
+                i += 1
+            elif i < len(payload) and payload[i] == u8(0x24):
+                i += 4
+                addr = read_le(payload, (size(num) - offset) * slot, slot)
+                mem[addr] = count % 256
+            else:
+                i += 1
+        elif c == u8(0):
+            i = len(payload)
+        else:
+            count += 1
+            i += 1
+    return mem
+
+managed fn check_write(target: u64, value: u64, offset: size, bits: Width) -> bool:
+    slot = 8
+    if bits == Width.Bits32:
+        slot = 4
+    p = write(target, value, offset, bits)
+    mem = simulate(p, offset, slot)
+    ok = True
+    j = 0
+    while j < slot:
+        want = i64((value >> u64(8 * j)) & u64(255))
+        key = target + u64(j)
+        got = i64(0) - 1
+        if key in mem:
+            got = mem[key]
+        if got != want:
+            ok = False
+        j += 1
+    return ok
+
+managed fn main():
+    s64 = sh(Width.Bits64)
+    s32 = sh(Width.Bits32)
+    print(f"sh64 len={len(s64)} nullfree={not has_byte(s64, u8(0))}")
+    print(f"sh32 len={len(s32)} nullfree={not has_byte(s32, u8(0))}")
+    key = vector[u8]()
+    key.push(u8(0xff))
+    data = vector[u8]()
+    data.push(u8(0x41))
+    data.push(u8(0x42))
+    enc = xor(data, key)
+    print(f"xor={enc}")
+    back = xor(enc, key)
+    print(f"xor back={back}")
+    print(f"fmt64={check_write(0x404040, 0xdeadbeef, 6, Width.Bits64)}")
+    print(f"fmt32={check_write(0x8048000, 0x4142, 4, Width.Bits32)}")
+# expect: sh64 len=23 nullfree=True
+# expect: sh32 len=25 nullfree=True
+# expect: xor=[190, 189]
+# expect: xor back=[65, 66]
+# expect: fmt64=True
+# expect: fmt32=True
