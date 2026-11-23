@@ -6,6 +6,7 @@ pub const PRELUDE: &str = "prelude";
 
 const MODULES: &[(&str, &str)] = &[
     ("prelude", include_str!("../stdlib/prelude.hsy")),
+    ("casing", include_str!("../stdlib/casing.hsy")),
     ("io", include_str!("../stdlib/io.hsy")),
     ("fs", include_str!("../stdlib/fs.hsy")),
     ("math", include_str!("../stdlib/math.hsy")),

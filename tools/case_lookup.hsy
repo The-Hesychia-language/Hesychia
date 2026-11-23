@@ -1,0 +1,75 @@
+# The lookups over the Unicode case tables above, appended to the generated data by
+# tools/unicode_case.py. The tables are sorted by code point, so membership and the single-code-
+# point mapping are binary searches; the handful of expansions (ß -> SS and the like) are a short
+# linear scan. `N` and `M` stand for each table's length, which the data above fixes.
+
+# Whether `cp` falls in one of the sorted (first, last) ranges of a set table.
+priv manual fn in_set[N](firsts: &array[u32, N], lasts: &array[u32, N], n: size, cp: u32) -> bool:
+    mut lo: size = 0
+    mut hi: size = n
+    while lo < hi:
+        const mid: size = lo + (hi - lo) // 2
+        if cp < firsts[mid]:
+            hi = mid
+        elif cp > lasts[mid]:
+            lo = mid + 1
+        else:
+            return True
+    return False
+
+# The single code point `cp` maps to, following the sorted (first, last, delta, stride) ranges;
+# `cp` itself when no range moves it.
+priv manual fn one[N](firsts: &array[u32, N], lasts: &array[u32, N], deltas: &array[i32, N], strides: &array[u32, N], n: size, cp: u32) -> u32:
+    mut lo: size = 0
+    mut hi: size = n
+    while lo < hi:
+        const mid: size = lo + (hi - lo) // 2
+        if cp < firsts[mid]:
+            hi = mid
+        elif cp > lasts[mid]:
+            lo = mid + 1
+        elif (cp - firsts[mid]) % strides[mid] == 0:
+            return u32(i32(cp) + deltas[mid])
+        else:
+            return cp
+    return cp
+
+# The code points `cp` expands to when it maps to more than one (ß -> SS, ﬁ -> FI): written into
+# `out`, with the count returned. 0 when `cp` is not an expansion, so the caller falls back to
+# `one`.
+priv manual fn expand[M](cps: &array[u32, M], first: &array[u32, M], second: &array[u32, M], third: &array[u32, M], m: size, cp: u32, out: &mut array[u32, 3]) -> size:
+    for i in range(m):
+        if cps[i] == cp:
+            out[0] = first[i]
+            if second[i] == 0:
+                return 1
+            out[1] = second[i]
+            if third[i] == 0:
+                return 2
+            out[2] = third[i]
+            return 3
+    return 0
+
+# `cp` mapped to capitals with `upper`, else to small letters: one to three code points written
+# into `out`, with the count returned.
+manual fn fold(cp: u32, upper: bool, out: &mut array[u32, 3]) -> size:
+    mut count: size = 0
+    if upper:
+        count = expand(&upper_many_cp, &upper_many_first, &upper_many_second, &upper_many_third, upper_many_n, cp, out)
+    else:
+        count = expand(&lower_many_cp, &lower_many_first, &lower_many_second, &lower_many_third, lower_many_n, cp, out)
+    if count > 0:
+        return count
+    if upper:
+        out[0] = one(&upper_first, &upper_last, &upper_delta, &upper_stride, upper_n, cp)
+    else:
+        out[0] = one(&lower_first, &lower_last, &lower_delta, &lower_stride, lower_n, cp)
+    return 1
+
+# Whether `cp` is a cased letter (its own case matters when deciding a final sigma).
+manual fn cased(cp: u32) -> bool:
+    return in_set(&cased_first, &cased_last, cased_n, cp)
+
+# Whether case ignores `cp` when it looks for the cased letters around a sigma.
+manual fn ignorable(cp: u32) -> bool:
+    return in_set(&ignorable_first, &ignorable_last, ignorable_n, cp)

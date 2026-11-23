@@ -64,12 +64,7 @@ priv manual fn byte_find(text: &str, part: &str, after: size) -> Optional[size]:
             return start
     return None
 
-@symbol("hsy_case_map")
-priv extern fn case_map(code: u32, upper: bool, out: ptr[u32]) -> size
-@symbol("hsy_case_cased")
-priv extern fn case_cased(code: u32) -> bool
-@symbol("hsy_case_ignorable")
-priv extern fn case_ignorable(code: u32) -> bool
+from casing import fold, cased, ignorable
 
 # The code point that starts at byte `i` of valid text, and how many bytes it takes.
 priv manual fn decoded(text: &str, i: size) -> (u32, size):
@@ -112,8 +107,8 @@ priv manual fn cased_before(text: &str, i: size) -> bool:
         while at > 0 and not starts_char(text, at):
             at -= 1
         const (code, _): (u32, size) = decoded(text, at)
-        if not case_ignorable(code):
-            return case_cased(code)
+        if not ignorable(code):
+            return cased(code)
     return False
 
 # Whether a cased letter comes from byte `i` on, past the characters case ignores.
@@ -121,8 +116,8 @@ priv manual fn cased_after(text: &str, i: size) -> bool:
     mut at: size = i
     while at < byte_len(text):
         const (code, n): (u32, size) = decoded(text, at)
-        if not case_ignorable(code):
-            return case_cased(code)
+        if not ignorable(code):
+            return cased(code)
         at += n
     return False
 
@@ -147,7 +142,7 @@ priv manual fn unicode_case(text: &str, upper: bool) -> str:
             if not upper and code == 931 and cased_before(text, i) and not cased_after(text, i + n):
                 encode(&mut out, 962)
             else:
-                const count: size = case_map(code, upper, ptr(&mut mapped[0]))
+                const count: size = fold(code, upper, &mut mapped)
                 for k in range(count):
                     encode(&mut out, mapped[k])
             i += n

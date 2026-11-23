@@ -396,7 +396,7 @@ manual fn main():
 | `src/platform.rs` | Target triples and the C compiler of each target |
 | `src/diag.rs` | Error and warning rendering |
 | `tests/run/`, `tests/fail/`, `tests/panic/` | Programs that must run, be rejected, or stop at runtime |
-| `tools/unicode_case.py` | Writes `src/codegen/case.c`, the Unicode case tables, from Python's Unicode data |
+| `tools/unicode_case.py` | Writes `stdlib/casing.hsy`, the Unicode case tables of `str.upper` / `str.lower`, from Python's Unicode data; the lookups appended to it live in `tools/case_lookup.hsy` |
 
 ## Editor
 
