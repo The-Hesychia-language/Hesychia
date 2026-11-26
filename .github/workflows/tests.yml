@@ -51,6 +51,15 @@ jobs:
           [ -e /c/msys64/mingw64/bin/cc.exe ] || cp /c/msys64/mingw64/bin/gcc.exe /c/msys64/mingw64/bin/cc.exe
           echo 'C:\msys64\mingw64\bin' >> "$GITHUB_PATH"
 
+      - name: Debug (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          cargo build --release
+          ./target/release/hsy build dbg/tls.hsy -o tls.exe && timeout 60 ./tls.exe; echo "tls exit $?"
+          ./target/release/hsy build dbg/plain.hsy -o plain.exe && timeout 60 ./plain.exe; echo "plain exit $?"
+          exit 1
+
       - name: Tests
         shell: bash
         run: cargo test --release
