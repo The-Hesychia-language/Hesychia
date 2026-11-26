@@ -1,0 +1,10 @@
+from io import print
+import re
+import fs
+managed fn main():
+    print(f"{"DryRun".kebab_case()} {"ok".kebab_case()} {"héllo wörld".byte_slice(1, 3)} [{"abc".byte_slice(2, 1)}]")
+    print(re.replace("a", "xay", "\\é\\q"))
+    print(f"{fs.sanitize_name("ü.nul")} {fs.sanitize_name("nul.txt")}")
+# expect: dry-run ok é []
+# expect: x\é\qy
+# expect: ü.nul _nul.txt

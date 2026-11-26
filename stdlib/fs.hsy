@@ -162,15 +162,6 @@ priv manual fn last_name(path: &str) -> (size, size):
         start -= 1
     return (start, end)
 
-priv manual fn bytes_between(path: &str, start: size, end: size) -> str:
-    mut out: vector[u8] = []
-    for i in range(start, end):
-        out.push(path.byte(i))
-    const text: Optional[str] = str.from_bytes(&out)
-    if text is None:
-        return ""
-    return text
-
 # `path` then `name`, with a `/` between them: `fs.join("data", "sales.csv")` is
 # "data/sales.csv". A `name` that is absolute replaces `path`.
 manual fn join(path: &str, name: &str) -> str:
@@ -183,7 +174,7 @@ manual fn join(path: &str, name: &str) -> str:
 # The last name of `path`: `fs.name("data/sales.csv")` is "sales.csv".
 manual fn name(path: &str) -> str:
     const (start, end): (size, size) = last_name(path)
-    return bytes_between(path, start, end)
+    return path.byte_slice(start, end)
 
 # The name of `path` without its extension: `fs.stem("data/sales.csv")` is "sales". A name
 # that starts with its only point, ".bashrc", has no extension.
@@ -193,8 +184,8 @@ manual fn stem(path: &str) -> str:
     while cut > start + 1 and path.byte(cut - 1) != 46:
         cut -= 1
     if cut > start + 1:
-        return bytes_between(path, start, cut - 1)
-    return bytes_between(path, start, end)
+        return path.byte_slice(start, cut - 1)
+    return path.byte_slice(start, end)
 
 # The folder that holds `path`: `fs.parent("data/sales.csv")` is "data", "." for a name alone,
 # and a root is its own parent.
@@ -206,7 +197,7 @@ manual fn parent(path: &str) -> str:
         end -= 1
     if end == 0:
         return "."
-    return bytes_between(path, 0, end)
+    return path.byte_slice(0, end)
 
 # Where the name sits in a C `struct dirent`.
 priv manual fn name_offset() -> size:
@@ -392,10 +383,10 @@ priv manual fn numbered(path: &str, attempt: i64) -> str:
     if attempt == 0:
         return f"{path}"
     const (start, end): (size, size) = last_name(path)
-    const whole: str = bytes_between(path, start, end)
+    const whole: str = path.byte_slice(start, end)
     const plain: str = stem(&whole)
-    const ext: str = bytes_between(&whole, byte_len(plain), byte_len(whole))
-    return bytes_between(path, 0, start) + f"{plain}_{attempt}{ext}"
+    const ext: str = whole.byte_slice(byte_len(plain), byte_len(whole))
+    return path.byte_slice(0, start) + f"{plain}_{attempt}{ext}"
 
 # Writes `bytes` to a new file at `path`, or at `stem_1.ext`, `stem_2.ext`... when the name is
 # taken, and gives the path written: `fs.write_unique("data/photo.jpg", &body)` may give
@@ -516,7 +507,7 @@ priv manual fn without_trailing_dots(text: &str) -> str:
     mut end: size = byte_len(text)
     while end > 0 and (text.byte(end - 1) == 46 or text.byte(end - 1) == 32):
         end -= 1
-    return bytes_between(text, 0, end)
+    return text.byte_slice(0, end)
 
 # Where the last `.` of `text` is.
 priv manual fn last_dot(text: &str) -> Optional[size]:
@@ -533,16 +524,16 @@ priv manual fn is_device_name(name: &str) -> bool:
     mut base: str = name.upper()
     const dot: Optional[size] = base.find(".")
     if dot is not None:
-        base = bytes_between(&base, 0, dot)
+        base = base.slice(0, dot)
     # "CON .txt" is the device too.
     mut end: size = byte_len(base)
     while end > 0 and base.byte(end - 1) == 32:
         end -= 1
-    base = bytes_between(&base, 0, end)
+    base = base.byte_slice(0, end)
     if base == "CON" or base == "PRN" or base == "AUX" or base == "NUL":
         return True
     if (base.starts_with("COM") or base.starts_with("LPT")) and len(base) == 4:
-        const last: str = bytes_between(&base, 3, byte_len(base))
+        const last: str = base.byte_slice(3, byte_len(base))
         return "0123456789¹²³".contains(&last)
     return False
 
@@ -552,7 +543,7 @@ priv manual fn shortened(name: &str) -> str:
     mut ext: str = ""
     const dot: Optional[size] = last_dot(name)
     if dot is not None and dot > 0 and byte_len(name) - dot <= 32:
-        ext = bytes_between(name, dot, byte_len(name))
+        ext = name.byte_slice(dot, byte_len(name))
     const body_end: size = byte_len(name) - byte_len(ext)
     # The longest start of the name that fits, ending between two characters.
     mut end: size = 0
@@ -561,7 +552,7 @@ priv manual fn shortened(name: &str) -> str:
         if next + byte_len(ext) > 255:
             break
         end = next
-    const kept: str = bytes_between(name, 0, end)
+    const kept: str = name.byte_slice(0, end)
     return without_trailing_dots(&kept) + ext
 
 # A file name made from `text` taken from outside (a URL, an HTTP header, an attachment),
@@ -588,7 +579,7 @@ manual fn sanitize_name(text: &str, fallback: &str = "file", ascii: bool = False
         if forbidden(code_at(text, at, count), ascii):
             pieces.push("_")
         else:
-            pieces.push(bytes_between(text, at, at + count))
+            pieces.push(text.byte_slice(at, at + count))
         at += count
     while len(pieces) > 0 and (pieces[len(pieces) - 1] == "." or pieces[len(pieces) - 1] == " "):
         pieces.pop()
@@ -629,7 +620,7 @@ manual fn join_within(folder: &str, path: &str) -> str raises IoError:
         if i < n and path.byte(i) == 0:
             raise outside(path, "a NUL byte")
         if i == n or path.byte(i) == 47 or path.byte(i) == 92:
-            const part: str = bytes_between(path, start, i)
+            const part: str = path.byte_slice(start, i)
             start = i + 1
             if part == "" or part == ".":
                 continue

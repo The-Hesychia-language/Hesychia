@@ -50,36 +50,23 @@ priv manual fn text_of(bytes: &vector[u8]) -> str:
 priv manual fn option_of(field: &str) -> str:
     return "--" + field.replace("_", "-")
 
-# The command of a case: `DryRun` is `dry-run`.
-priv manual fn command_of(name: &str) -> str:
-    mut out: vector[u8] = []
-    for i in range(byte_len(name)):
-        const b: u8 = name.byte(i)
-        if b >= 65 and b <= 90:
-            if i > 0:
-                out.push(45)
-            out.push(b + 32)
-        else:
-            out.push(b)
-    return text_of(&out)
-
 # The case of the enum `F` that `text` names: `dry-run` is `DryRun`. Its cases carry no data.
 priv manual fn case_named[F](slot: &mut F, text: &str, shown: &str) raises ArgsError:
     mut names: vector[str] = []
     comptime for v in variants(F):
         comptime for _f in fields(v):
             comptime assert(False, "args reads an enum whose cases carry no data")
-        if text == command_of(v.name):
+        if text == v.name.kebab_case():
             slot = empty[F](v)
             return
-        names.push(command_of(v.name))
+        names.push(v.name.kebab_case())
     raise ArgsError(reason=f"{shown}: `{text}` is not one of {", ".join(&names)}")
 
 # The words that name the cases of the enum `F`: `fast|dry-run`.
 priv manual fn case_names[F]() -> str:
     mut names: vector[str] = []
     comptime for v in variants(F):
-        names.push(command_of(v.name))
+        names.push(v.name.kebab_case())
     return "|".join(&names)
 
 # `value` as the command line writes it: an enum by the word of its case.
@@ -87,7 +74,7 @@ priv manual fn shown_value[F](value: &F) -> str:
     comptime if is_enum(F):
         comptime for v in variants(F):
             if value == empty[F](v):
-                return command_of(v.name)
+                return v.name.kebab_case()
         return ""
     else:
         return f"{value}"
@@ -218,7 +205,7 @@ manual fn to_struct[T](words: &vector[str]) -> T raises ArgsError:
         if len(words) == 0:
             raise ArgsError(reason="a command is missing")
         comptime for v in variants(T):
-            if words[0] == command_of(v.name):
+            if words[0] == v.name.kebab_case():
                 mut made: T = empty[T](v)
                 comptime for f in fields(v):
                     if is_flag(&field(made, f)):
@@ -305,7 +292,7 @@ manual fn help[T](program: &str, command: &str = "") -> str:
     const about: str = doc(T)
     comptime if is_enum(T):
         comptime for v in variants(T):
-            if command == command_of(v.name):
+            if command == v.name.kebab_case():
                 made.usage += f" {command}"
                 const shown: T = empty[T](v)
                 comptime for f in fields(v):
@@ -316,7 +303,7 @@ manual fn help[T](program: &str, command: &str = "") -> str:
                 return laid_out(v.doc, &made)
         made.usage += " <command> [options]"
         comptime for v in variants(T):
-            made.names.push(command_of(v.name))
+            made.names.push(v.name.kebab_case())
             made.texts.push(v.doc.replace("\n", " "))
         return laid_out(&about, &made) + f"\n\n`{program} <command> --help` says more about a command."
     else:

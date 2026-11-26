@@ -109,19 +109,6 @@ priv manual fn records(rows: &vector[vector[str]]) -> vector[dict[str, str]] rai
 # of them, for which an empty cell is `None`. Columns that name no field are passed over; a
 # field with a default or an `Optional` may have no column.
 
-# The name of the case `name` in a cell: `DryRun` is "dry-run".
-priv manual fn case_text(name: &str) -> str:
-    mut out: vector[u8] = []
-    for i in range(byte_len(name)):
-        const b: u8 = name.byte(i)
-        if b >= 65 and b <= 90:
-            if i > 0:
-                out.push(45)
-            out.push(b + 32)
-        else:
-            out.push(b)
-    return field_of(&out)
-
 # What a cell that does not fit raises: the column and line are added where it is read.
 priv manual fn refused(reason: &str) -> CsvError:
     return CsvError(line=0, column="", reason=f"{reason}")
@@ -160,10 +147,10 @@ priv manual fn fill[T](out: &mut T, cell: &str) raises CsvError:
         comptime for v in variants(T):
             comptime for _f in fields(v):
                 comptime assert(False, "csv reads an enum whose cases carry no data")
-            if cell == case_text(v.name):
+            if cell == v.name.kebab_case():
                 out = empty[T](v)
                 return
-            names.push(case_text(v.name))
+            names.push(v.name.kebab_case())
         raise refused(f"`{cell}` is not one of {", ".join(&names)}")
     elif is_optional(T):
         if len(cell) == 0:
@@ -215,7 +202,7 @@ priv manual fn cell_of[T](value: &T) -> str:
     elif is_enum(T):
         comptime for v in variants(T):
             if value == empty[T](v):
-                return case_text(v.name)
+                return v.name.kebab_case()
         return ""
     elif is_optional(T):
         const held: T = value.copy()
