@@ -13,13 +13,6 @@ manual struct CsvError:
     column: str
     reason: str
 
-# Bytes cut from valid text at ASCII separators are valid text.
-priv manual fn field_of(bytes: &vector[u8]) -> str:
-    const text: Optional[str] = str.from_bytes(bytes)
-    if text is None:
-        panic("csv: a field is not UTF-8")
-    return text
-
 priv manual fn check_sep(sep: &str) raises CsvError:
     if byte_len(sep) != 1 or sep == "\"" or sep == "\n" or sep == "\r":
         raise CsvError(line=0, column="", reason="the separator is one character, not a quote or a line break")

@@ -52,6 +52,59 @@ priv manual fn bytes_of(text: &str, start: size, end: size) -> str:
         out.push(text.byte(i))
     return text_of(&out)
 
+# How many bytes the UTF-8 character at `at` takes, or 0 if the bytes there are not one.
+priv manual fn utf8_len(bytes: &vector[u8], at: size) -> size:
+    const b: u8 = bytes[at]
+    if b < 128:
+        return 1
+    mut n: size = 0
+    mut low: u8 = 128
+    mut high: u8 = 191
+    if b >= 194 and b <= 223:
+        n = 2
+    elif b >= 224 and b <= 239:
+        n = 3
+        if b == 224:
+            low = 160
+        elif b == 237:
+            high = 159
+    elif b >= 240 and b <= 244:
+        n = 4
+        if b == 240:
+            low = 144
+        elif b == 244:
+            high = 143
+    else:
+        return 0
+    if n > len(bytes) - at:
+        return 0
+    for k in range(1, n):
+        const c: u8 = bytes[at + k]
+        if (k == 1 and (c < low or c > high)) or c < 128 or c > 191:
+            return 0
+    return n
+
+# `str.from_any_bytes(bytes)`: `bytes` as text, each byte that is not part of a UTF-8
+# character as U+FFFD.
+priv manual fn any_bytes_text(bytes: &vector[u8]) -> str:
+    const valid: Optional[str] = str.from_bytes(bytes)
+    if valid is not None:
+        return valid
+    mut out: vector[u8] = []
+    mut i: size = 0
+    while i < len(bytes):
+        const n: size = utf8_len(bytes, i)
+        if n == 0:
+            out.push(239)
+            out.push(191)
+            out.push(189)
+            i += 1
+        else:
+            for k in range(n):
+                out.push(bytes[i + k])
+            i += n
+    return text_of(&out)
+
 # The byte where `part` first appears at or after byte `after`.
 priv manual fn byte_find(text: &str, part: &str, after: size) -> Optional[size]:
     if byte_len(part) > byte_len(text):

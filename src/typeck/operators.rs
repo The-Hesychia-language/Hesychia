@@ -143,6 +143,18 @@ impl Checker<'_> {
         self.check_fn_call(expr, index)
     }
 
+    /// `str.from_any_bytes(v)`: the prelude's `any_bytes_text(v)`, which never fails.
+    pub(super) fn check_from_any_bytes(&mut self, expr: &mut Expr) -> Result<Type> {
+        let ExprKind::Method { args, .. } = &mut expr.kind else { unreachable!("called on a method") };
+        let args = std::mem::take(args);
+        if args.len() != 1 {
+            return Err(Diagnostic::error(expr.span, "`str.from_any_bytes` takes one `vector[u8]`"));
+        }
+        let index = self.prelude_fn("any_bytes_text").expect("the prelude reads any bytes");
+        expr.kind = ExprKind::Call { callee: "str.from_any_bytes".into(), type_args: Vec::new(), args, target: None };
+        self.check_fn_call(expr, index)
+    }
+
     /// `str(x)` writes `x` as `f"{x}"` does.
     pub(super) fn check_to_str(&mut self, expr: &mut Expr) -> Result<Type> {
         let ExprKind::Call { args, .. } = &mut expr.kind else { unreachable!("called on a call") };
