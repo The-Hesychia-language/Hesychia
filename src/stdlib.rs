@@ -12,6 +12,7 @@ const MODULES: &[(&str, &str)] = &[
     ("time", include_str!("../stdlib/time.hsy")),
     ("os", include_str!("../stdlib/os.hsy")),
     ("random", include_str!("../stdlib/random.hsy")),
+    ("scan", include_str!("../stdlib/scan.hsy")),
     ("csv", include_str!("../stdlib/csv.hsy")),
     ("json", include_str!("../stdlib/json.hsy")),
     ("thread", include_str!("../stdlib/thread.hsy")),

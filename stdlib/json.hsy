@@ -1,7 +1,9 @@
 # json: JSON text to values and back (RFC 8259).
 
 import io
+import scan
 from io import File, IoError, print, stdout
+from scan import Class, Scanner, ScanError
 
 # A JSON value. Objects keep their keys in the order they were read or added.
 manual enum Value:
@@ -27,52 +29,28 @@ manual struct JsonError:
     column: size
     reason: str
 
-# The error at the byte `at` of `text`.
-priv manual fn error(text: &str, at: size, reason: &str) -> JsonError:
-    mut line: size = 1
-    mut column: size = 1
-    for i in range(at):
-        if i >= byte_len(text):
-            break
-        const b: u8 = text.byte(i)
-        if b == 10:
-            line += 1
-            column = 1
-        elif (b & 192) != 128:
-            column += 1
-    return JsonError(line=line, column=column, reason=f"{reason}")
+# The error at `at`, a mark of `s`.
+priv manual fn error(s: &Scanner, at: size, reason: &str) -> JsonError:
+    const e: ScanError = s.error_at(at, reason)
+    return JsonError(line=e.line, column=e.column, reason=e.reason.copy())
 
-priv manual fn skip_space(text: &str, at: &mut size):
-    while at < byte_len(text) and (text.byte(at) == 32 or text.byte(at) == 9 or text.byte(at) == 10 or text.byte(at) == 13):
-        at += 1
-
-priv manual fn expect_word(text: &str, at: &mut size, word: &str) raises JsonError:
-    for i in range(byte_len(word)):
-        if at + i >= byte_len(text) or text.byte(at + i) != word.byte(i):
-            raise error(text, at, f"expected `{word}`")
-    at += byte_len(word)
-
-priv manual fn hex_digit(b: u8) -> Optional[u32]:
-    if b >= 48 and b <= 57:
-        return u32(b - 48)
-    if b >= 97 and b <= 102:
-        return u32(b - 87)
-    if b >= 65 and b <= 70:
-        return u32(b - 55)
-    return None
+# Takes `word`, the whole of `null`, `true` or `false`.
+priv manual fn expect_word(s: &mut Scanner, word: &str) raises JsonError:
+    if not s.eat(word):
+        raise error(s, s.mark(), f"expected `{word}`")
 
 # The four hex digits of a `\u` escape.
-priv manual fn code_unit(text: &str, at: &mut size) -> u32 raises JsonError:
-    mut value: u32 = 0
+priv manual fn code_unit(s: &mut Scanner) -> u32 raises JsonError:
+    const at: size = s.mark()
+    mut digits: str = ""
     for _ in range(4):
-        if at >= byte_len(text):
-            raise error(text, at, "a `\\u` escape needs four hex digits")
-        const digit: Optional[u32] = hex_digit(text.byte(at))
-        if digit is None:
-            raise error(text, at, "a `\\u` escape needs four hex digits")
-        value = value * 16 + digit
-        at += 1
-    return value
+        if s.next_is("\"") or s.at_end():
+            raise error(s, at, "a `\\u` escape needs four hex digits")
+        digits += s.next()
+    try:
+        return check u32(digits, base=16)
+    except ParseError as _e:
+        raise error(s, at, "a `\\u` escape needs four hex digits")
 
 priv manual fn push_utf8(out: &mut vector[u8], code: u32):
     if code < 128:
@@ -91,161 +69,133 @@ priv manual fn push_utf8(out: &mut vector[u8], code: u32):
         out.push(u8(128 | (code & 63)))
 
 # A string, from its opening quote.
-priv manual fn read_text(text: &str, at: &mut size) -> str raises JsonError:
-    at += 1
+priv manual fn read_text(s: &mut Scanner) -> str raises JsonError:
+    s.next()
     mut out: vector[u8] = []
-    while at < byte_len(text) and text.byte(at) != 34:
-        const b: u8 = text.byte(at)
-        if b < 32:
-            raise error(text, at, "a control character inside a string")
-        if b != 92:
-            out.push(b)
-            at += 1
+    while True:
+        const start: size = s.mark()
+        const piece: str = s.take_except("\"\\")
+        const bytes: vector[u8] = piece.bytes()
+        for i in range(len(bytes)):
+            if bytes[i] < 32:
+                raise error(s, start + i, "a control character inside a string")
+        out.extend(bytes)
+        if s.eat("\""):
+            return text_of(&out)
+        if s.at_end():
+            raise error(s, s.mark(), "a string is not closed")
+        s.next()
+        const at: size = s.mark()
+        const escape: str = s.next()
+        if escape == "\"" or escape == "\\" or escape == "/":
+            out.extend(escape.bytes())
+        elif escape == "b":
+            out.push(8)
+        elif escape == "f":
+            out.push(12)
+        elif escape == "n":
+            out.push(10)
+        elif escape == "r":
+            out.push(13)
+        elif escape == "t":
+            out.push(9)
+        elif escape == "u":
+            mut code: u32 = check code_unit(s)
+            # A pair of surrogates stands for one character beyond U+FFFF.
+            if code >= 55296 and code < 56320:
+                check expect_word(s, "\\u")
+                const low: u32 = check code_unit(s)
+                if low < 56320 or low >= 57344:
+                    raise error(s, s.mark(), "a lone surrogate in a `\\u` escape")
+                code = 65536 + ((code - 55296) << 10) + (low - 56320)
+            elif code >= 56320 and code < 57344:
+                raise error(s, s.mark(), "a lone surrogate in a `\\u` escape")
+            push_utf8(&mut out, code)
+        elif escape == "":
+            raise error(s, at, "a string is not closed")
         else:
-            at += 1
-            if at >= byte_len(text):
-                raise error(text, at, "a string is not closed")
-            const escape: u8 = text.byte(at)
-            at += 1
-            if escape == 34 or escape == 92 or escape == 47:
-                out.push(escape)
-            elif escape == 98:
-                out.push(8)
-            elif escape == 102:
-                out.push(12)
-            elif escape == 110:
-                out.push(10)
-            elif escape == 114:
-                out.push(13)
-            elif escape == 116:
-                out.push(9)
-            elif escape == 117:
-                mut code: u32 = check code_unit(text, at)
-                # A pair of surrogates stands for one character beyond U+FFFF.
-                if code >= 55296 and code < 56320:
-                    check expect_word(text, at, "\\u")
-                    const low: u32 = check code_unit(text, at)
-                    if low < 56320 or low >= 57344:
-                        raise error(text, at, "a lone surrogate in a `\\u` escape")
-                    code = 65536 + ((code - 55296) << 10) + (low - 56320)
-                elif code >= 56320 and code < 57344:
-                    raise error(text, at, "a lone surrogate in a `\\u` escape")
-                push_utf8(&mut out, code)
-            else:
-                raise error(text, at - 1, "an unknown escape")
-    if at >= byte_len(text):
-        raise error(text, at, "a string is not closed")
-    at += 1
-    return text_of(&out)
+            raise error(s, at, "an unknown escape")
+    return ""
 
-priv manual fn is_digit(b: u8) -> bool:
-    return b >= 48 and b <= 57
-
-priv manual fn read_number(text: &str, at: &mut size) -> f64 raises JsonError:
-    const start: size = at
-    const n: size = byte_len(text)
-    if at < n and text.byte(at) == 45:
-        at += 1
-    if at >= n or not is_digit(text.byte(at)):
-        raise error(text, start, "expected a value")
-    if text.byte(at) == 48:
-        at += 1
-    else:
-        while at < n and is_digit(text.byte(at)):
-            at += 1
-    if at < n and text.byte(at) == 46:
-        at += 1
-        if at >= n or not is_digit(text.byte(at)):
-            raise error(text, at, "expected digits after the point")
-        while at < n and is_digit(text.byte(at)):
-            at += 1
-    if at < n and (text.byte(at) == 101 or text.byte(at) == 69):
-        at += 1
-        if at < n and (text.byte(at) == 43 or text.byte(at) == 45):
-            at += 1
-        if at >= n or not is_digit(text.byte(at)):
-            raise error(text, at, "expected digits in the exponent")
-        while at < n and is_digit(text.byte(at)):
-            at += 1
-    const digits: str = text[start:at]
+priv manual fn read_number(s: &mut Scanner) -> f64 raises JsonError:
+    const start: size = s.mark()
+    s.eat("-")
+    const digits: str = s.take_while(Class.Digit)
+    if byte_len(digits) == 0:
+        raise error(s, start, "expected a value")
+    if byte_len(digits) > 1 and digits.starts_with("0"):
+        raise error(s, start, "a number does not start with `0` and another digit")
+    if s.eat("."):
+        if byte_len(s.take_while(Class.Digit)) == 0:
+            raise error(s, s.mark(), "expected digits after the point")
+    if s.eat("e") or s.eat("E"):
+        if not s.eat("+"):
+            s.eat("-")
+        if byte_len(s.take_while(Class.Digit)) == 0:
+            raise error(s, s.mark(), "expected digits in the exponent")
+    const digits_text: str = s.since(start)
     try:
-        return check f64(digits)
+        return check f64(digits_text)
     except ParseError as _e:
-        raise error(text, start, "not a number")
+        raise error(s, start, "not a number")
 
-priv manual fn read_value(text: &str, at: &mut size, depth: size) -> Value raises JsonError:
+priv manual fn read_value(s: &mut Scanner, depth: size) -> Value raises JsonError:
     if depth > 512:
-        raise error(text, at, "values nested too deeply")
-    skip_space(text, at)
-    if at >= byte_len(text):
-        raise error(text, at, "expected a value")
-    const b: u8 = text.byte(at)
-    if b == 110:
-        check expect_word(text, at, "null")
+        raise error(s, s.mark(), "values nested too deeply")
+    s.skip_space()
+    if s.at_end():
+        raise error(s, s.mark(), "expected a value")
+    if s.next_is("n"):
+        check expect_word(s, "null")
         return Value.Null
-    if b == 116:
-        check expect_word(text, at, "true")
+    if s.next_is("t"):
+        check expect_word(s, "true")
         return Value.Bool(True)
-    if b == 102:
-        check expect_word(text, at, "false")
+    if s.next_is("f"):
+        check expect_word(s, "false")
         return Value.Bool(False)
-    if b == 34:
-        return Value.Text(check read_text(text, at))
-    if b == 91:
-        at += 1
+    if s.next_is("\""):
+        return Value.Text(check read_text(s))
+    if s.eat("["):
         mut items: vector[Value] = []
-        skip_space(text, at)
-        if at < byte_len(text) and text.byte(at) == 93:
-            at += 1
+        s.skip_space()
+        if s.eat("]"):
             return Value.List(items)
-        mut more: bool = True
-        while more:
-            items.push(check read_value(text, at, depth + 1))
-            skip_space(text, at)
-            if at < byte_len(text) and text.byte(at) == 44:
-                at += 1
-            elif at < byte_len(text) and text.byte(at) == 93:
-                at += 1
-                more = False
-            else:
-                raise error(text, at, "expected `,` or `]`")
-        return Value.List(items)
-    if b == 123:
-        at += 1
+        while True:
+            items.push(check read_value(s, depth + 1))
+            s.skip_space()
+            if s.eat("]"):
+                return Value.List(items)
+            if not s.eat(","):
+                raise error(s, s.mark(), "expected `,` or `]`")
+    if s.eat("{"):
         mut fields: dict[str, Value] = dict()
-        skip_space(text, at)
-        if at < byte_len(text) and text.byte(at) == 125:
-            at += 1
+        s.skip_space()
+        if s.eat("}"):
             return Value.Object(fields)
-        mut more: bool = True
-        while more:
-            skip_space(text, at)
-            if at >= byte_len(text) or text.byte(at) != 34:
-                raise error(text, at, "expected a key in quotes")
-            const key: str = check read_text(text, at)
-            skip_space(text, at)
-            if at >= byte_len(text) or text.byte(at) != 58:
-                raise error(text, at, "expected `:`")
-            at += 1
-            fields[key] = check read_value(text, at, depth + 1)
-            skip_space(text, at)
-            if at < byte_len(text) and text.byte(at) == 44:
-                at += 1
-            elif at < byte_len(text) and text.byte(at) == 125:
-                at += 1
-                more = False
-            else:
-                raise error(text, at, "expected `,` or `}`")
-        return Value.Object(fields)
-    return Value.Number(check read_number(text, at))
+        while True:
+            s.skip_space()
+            if not s.next_is("\""):
+                raise error(s, s.mark(), "expected a key in quotes")
+            const key: str = check read_text(s)
+            s.skip_space()
+            if not s.eat(":"):
+                raise error(s, s.mark(), "expected `:`")
+            fields[key] = check read_value(s, depth + 1)
+            s.skip_space()
+            if s.eat("}"):
+                return Value.Object(fields)
+            if not s.eat(","):
+                raise error(s, s.mark(), "expected `,` or `}`")
+    return Value.Number(check read_number(s))
 
 # The value written in `text`.
 manual fn parse(text: &str) -> Value raises JsonError:
-    mut at: size = 0
-    const value: Value = check read_value(text, &mut at, 0)
-    skip_space(text, &mut at)
-    if at != byte_len(text):
-        raise error(text, at, "text after the value")
+    mut s: Scanner = scan.over(text)
+    const value: Value = check read_value(&mut s, 0)
+    s.skip_space()
+    if not s.at_end():
+        raise error(&s, s.mark(), "text after the value")
     return value
 
 priv manual fn dump_text(out: &mut str, text: &str):

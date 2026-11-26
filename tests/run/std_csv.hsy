@@ -34,6 +34,11 @@ managed fn main():
     print(f"{named[0]["name"]} {len(nothing)}")
     print(csv.to_text(table), end="")
     print(csv.to_text(named, sep="|"), end="")
+    for text in ["a,\n", "x\r\n\r\ny\r\n", "\"a\"b,c", "ab\"c", "\"é,\"\"\",ü\n"]:
+        try:
+            print(f"{csv.parse[vector](text)}")
+        except CsvError as e:
+            print(f"line {e.line}: {e.reason}")
 # expect: 3 ['ana', 'Paris', 'says "hi"'] Lyon, FR
 # expect: Paris two|lines
 # expect: name,city,note
@@ -51,3 +56,8 @@ managed fn main():
 # expect: 1,a;b
 # expect: id|name
 # expect: 7|Zoé
+# expect: [['a', '']]
+# expect: [['x'], ['y']]
+# expect: [['ab', 'c']]
+# expect: line 1: a quote inside a field that is not quoted
+# expect: [['é,"', 'ü']]

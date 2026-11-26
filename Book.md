@@ -1091,6 +1091,20 @@ managed struct Options:
 o = args.parse[Options]()      # tool a.txt --retries 5 -v
 ```
 
+### `scan`
+Read a text piece by piece, for a parser of your own.
+```python
+import scan
+from scan import Class
+
+s = scan.over("port = 8080")
+key = s.take_while(Class.Word)    # "port"
+s.skip_space()
+s.expect("=")                     # raises ScanError(line, column, reason) if absent
+s.skip_space()
+port = i64(s.take_while(Class.Digit))
+```
+
 ### `json`
 Read and write JSON as structs.
 ```python

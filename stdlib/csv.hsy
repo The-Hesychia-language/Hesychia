@@ -2,7 +2,9 @@
 # A field with the separator, a quote or a line break is quoted, and its quotes doubled.
 
 import io
+import scan
 from io import File, IoError, print, stdout
+from scan import Scanner
 
 # Text that is not a well-formed table, or a row that does not fit a struct. `line` counts
 # from 1 (0 for the separator); `column` names the column at fault, "" when there is none.
@@ -52,59 +54,40 @@ manual fn parse[R](text: &str, sep: &str = ",") -> vector[row(R)] raises CsvErro
     else:
         return check structs[R](&rows)
 
-# Each line of `text` cut into its fields.
+# Each line of `text` cut into its fields. Empty lines are passed over.
 priv manual fn fields_of(text: &str, sep: &str) -> vector[vector[str]] raises CsvError:
     check check_sep(sep)
-    const split: u8 = sep.byte(0)
-    const n: size = byte_len(text)
-    # The row being read is the last one.
-    mut rows: vector[vector[str]] = [[]]
-    mut field: vector[u8] = []
-    mut line: size = 1
-    mut quoted: bool = False
-    # Whether the current row has begun, so that an empty last line adds nothing.
-    mut started: bool = False
-    mut i: size = 0
-    while i < n:
-        const b: u8 = text.byte(i)
-        if quoted:
-            if b == 34 and i + 1 < n and text.byte(i + 1) == 34:
-                field.push(34)
-                i += 1
-            elif b == 34:
-                quoted = False
-            else:
-                if b == 10:
-                    line += 1
-                field.push(b)
-        elif b == 34:
-            if len(field) > 0:
-                raise CsvError(line=line, column="", reason="a quote inside a field that is not quoted")
-            quoted = True
-            started = True
-        elif b == split:
-            rows[len(rows) - 1].push(field_of(&field))
-            field.clear()
-            started = True
-        elif b == 10 or b == 13:
-            if b == 13 and i + 1 < n and text.byte(i + 1) == 10:
-                i += 1
-            if started or len(field) > 0:
-                rows[len(rows) - 1].push(field_of(&field))
-                field.clear()
-                rows.push([])
-            started = False
-            line += 1
-        else:
-            field.push(b)
-            started = True
-        i += 1
-    if quoted:
-        raise CsvError(line=line, column="", reason="a quoted field is not closed")
-    if started or len(field) > 0:
-        rows[len(rows) - 1].push(field_of(&field))
-    else:
-        rows.pop()
+    const stops: str = sep + "\"\r\n"
+    mut s: Scanner = scan.over(text)
+    mut rows: vector[vector[str]] = []
+    while not s.at_end():
+        if s.eat("\r\n") or s.eat("\n") or s.eat("\r"):
+            continue
+        mut row: vector[str] = []
+        mut more: bool = True
+        while more:
+            mut field: str = ""
+            if s.eat("\""):
+                # Quoted: up to the quote that is not doubled, then what follows it.
+                mut open: bool = True
+                while open:
+                    field += s.take_until("\"")
+                    if s.at_end():
+                        raise CsvError(line=s.line(), column="", reason="a quoted field is not closed")
+                    s.next()
+                    if s.eat("\""):
+                        field += "\""
+                    else:
+                        open = False
+            field += s.take_except(&stops)
+            if s.next_is("\""):
+                raise CsvError(line=s.line(), column="", reason="a quote inside a field that is not quoted")
+            row.push(field)
+            more = s.eat(sep)
+        # What stopped the last field is the end of its line.
+        if not s.eat("\r\n") and not s.eat("\n"):
+            s.eat("\r")
+        rows.push(row)
     return rows
 
 priv manual fn records(rows: &vector[vector[str]]) -> vector[dict[str, str]] raises CsvError:
