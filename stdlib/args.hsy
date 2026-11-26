@@ -13,9 +13,10 @@
 #
 #     options = args.parse[Options]()
 #
-# A field `dry_run` is the option `--dry-run`. The comments above the struct and its fields
-# are the text of `--help`. With an enum, each case is a command: `tool build --release`
-# gives `Command.Build(release=True)`.
+# A field `dry_run` is the option `--dry-run`. A field of a `managed enum` takes the word of a
+# case: `mode: Mode = Mode.Fast` reads `--mode dry-run` as `Mode.DryRun`. The comments above
+# the struct and its fields are the text of `--help`. With an enum as the struct, each case
+# is a command: `tool build --release` gives `Command.Build(release=True)`.
 
 import os
 from io import print, stderr
@@ -59,6 +60,35 @@ priv manual fn command_of(name: &str) -> str:
         else:
             out.push(b)
     return text_of(&out)
+
+# The case of the enum `F` that `text` names: `dry-run` is `DryRun`. Its cases carry no data.
+priv manual fn case_named[F](slot: &mut F, text: &str, shown: &str) raises ArgsError:
+    mut names: vector[str] = []
+    comptime for v in variants(F):
+        comptime for _f in fields(v):
+            comptime assert(False, "args reads an enum whose cases carry no data")
+        if text == command_of(v.name):
+            slot = empty[F](v)
+            return
+        names.push(command_of(v.name))
+    raise ArgsError(reason=f"{shown}: `{text}` is not one of {", ".join(&names)}")
+
+# The words that name the cases of the enum `F`: `fast|dry-run`.
+priv manual fn case_names[F]() -> str:
+    mut names: vector[str] = []
+    comptime for v in variants(F):
+        names.push(command_of(v.name))
+    return "|".join(&names)
+
+# `value` as the command line writes it: an enum by the word of its case.
+priv manual fn shown_value[F](value: &F) -> str:
+    comptime if is_enum(F):
+        comptime for v in variants(F):
+            if value == empty[F](v):
+                return command_of(v.name)
+        return ""
+    else:
+        return f"{value}"
 
 priv manual fn is_flag[F](_slot: &F) -> bool:
     comptime if F == bool:
@@ -124,12 +154,14 @@ priv manual fn convert[F](slot: &mut F, text: &str, shown: &str) raises ArgsErro
             slot = check f64(text)
         except ParseError as e:
             raise ArgsError(reason=f"{shown}: `{text}`: {e.reason}")
+    elif is_enum(F):
+        check case_named(slot, text, shown)
     elif F == Optional:
         mut one: item(F) = empty[item(F)]()
         check convert(&mut one, text, shown)
         slot = one
     else:
-        comptime assert(False, "args reads `str`, whole numbers, `f64` and `bool`, an `Optional` or a `vector` of them")
+        comptime assert(False, "args reads `str`, whole numbers, `f64`, `bool` and enums, an `Optional` or a `vector` of them")
 
 # Gives the field `name` what the command line has for it.
 priv manual fn take[F](slot: &mut F, name: &str, has_default: bool, words: &mut Words) raises ArgsError:
@@ -203,10 +235,13 @@ manual fn to_struct[T](words: &vector[str]) -> T raises ArgsError:
 
 # --- help ---------------------------------------------------------------------------------
 
-# How the value of an option is shown: `<n>` for a number, `<text>` for a text.
+# How the value of an option is shown: `<n>` for a number, `<text>` for a text, `<a|b>` for
+# the cases of an enum.
 priv manual fn kind[F](_slot: &F) -> str:
     comptime if F == str:
         return "<text>"
+    elif is_enum(F):
+        return f"<{case_names[F]()}>"
     elif F == Optional:
         const inner: item(F) = empty[item(F)]()
         return kind(&inner)
@@ -225,7 +260,7 @@ priv manual fn describe[F](slot: &F, name: &str, doc: &str, has_default: bool, h
         if has_default:
             if len(text) > 0:
                 text += " "
-            text += f"(default: {slot})"
+            text += f"(default: {shown_value(slot)})"
         if has_default or holds_optional(slot):
             help.names.push(f"{option_of(name)} {kind(slot)}")
         else:

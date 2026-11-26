@@ -1,15 +1,11 @@
 import json
 
-manual enum Color:
-    Red
-    Blue
-
-manual struct Car:
-    color: Color
+manual struct Key:
+    pair: (i32, i32)
 
 manual fn main():
     try:
-        const _car: Car = check json.to_struct[Car]("{}")
+        const _key: Key = check json.to_struct[Key]("{}")
     except JsonError as _e:
         pass
-# error: json reads texts, numbers, `bool`, structs, `vector`, `dict`, `Optional` and `Value`
+# error: json reads texts, numbers, `bool`, structs, enums, `vector`, `dict`, `Optional` and `Value`

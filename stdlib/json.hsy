@@ -332,7 +332,8 @@ priv manual fn dump_into(out: &mut str, value: &Value, indent: size, depth: size
 # --- structs ---------------------------------------------------------------------------
 # A struct is read from an object, and written as one: each field from the key of its name.
 # A field can be a text, a number, a `bool`, a struct, a `vector`, a `dict` from texts, an
-# `Optional` of them (absent or `null` is `None`), or a `Value`. Keys that name no field are
+# `Optional` of them (absent or `null` is `None`), or a `Value`. A `managed enum` is the text
+# of its case: `Mode.DryRun` is "dry-run". Keys that name no field are
 # passed over.
 
 # What a value of the wrong kind raises. Its reason starts with where it is, which each
@@ -349,6 +350,35 @@ priv manual fn holds_optional[T](_slot: &T) -> bool:
         return True
     else:
         return False
+
+# The name of the case `name` in JSON: `DryRun` is "dry-run", as `args` writes it.
+priv manual fn case_text(name: &str) -> str:
+    mut out: vector[u8] = []
+    for i in range(byte_len(name)):
+        const b: u8 = name.byte(i)
+        if b >= 65 and b <= 90:
+            if i > 0:
+                out.push(45)
+            out.push(b + 32)
+        else:
+            out.push(b)
+    return text_of(&out)
+
+# Sets `out` to the case of the enum `T` that `value` names. Its cases carry no data.
+priv manual fn fill_case[T](out: &mut T, value: &Value) raises JsonError:
+    mut names: vector[str] = []
+    comptime for v in variants(T):
+        comptime for _f in fields(v):
+            comptime assert(False, "json reads an enum whose cases carry no data")
+        match value:
+            case Value.Text(text):
+                if text == case_text(v.name):
+                    out = empty[T](v)
+                    return
+            case _:
+                pass
+        names.push(f"\"{case_text(v.name)}\"")
+    raise refused(f"expected one of {", ".join(&names)}")
 
 # Sets `out` from `value`.
 priv manual fn fill[T](out: &mut T, value: &Value) raises JsonError:
@@ -424,6 +454,8 @@ priv manual fn fill[T](out: &mut T, value: &Value) raises JsonError:
                     out[name.copy()] = one
             case _:
                 raise refused("expected an object")
+    elif is_enum(T):
+        check fill_case(out, value)
     elif is_struct(T):
         match value:
             case Value.Object(entries):
@@ -438,7 +470,7 @@ priv manual fn fill[T](out: &mut T, value: &Value) raises JsonError:
             case _:
                 raise refused("expected an object")
     else:
-        comptime assert(False, "json reads texts, numbers, `bool`, structs, `vector`, `dict`, `Optional` and `Value`")
+        comptime assert(False, "json reads texts, numbers, `bool`, structs, enums, `vector`, `dict`, `Optional` and `Value`")
 
 # `text` read as a `T`: `json.to_struct[User](text)` for a struct, or
 # `json.to_struct[vector[User]](text)` for a list of them. What does not fit raises a
@@ -494,13 +526,18 @@ priv manual fn to_value[T](x: &T) -> Value:
         for name in &names:
             entries[name.copy()] = to_value(&x[name])
         return Value.Object(entries)
+    elif is_enum(T):
+        comptime for v in variants(T):
+            if x == empty[T](v):
+                return Value.Text(case_text(v.name))
+        return Value.Null
     elif is_struct(T):
         mut entries: dict[str, Value] = dict()
         comptime for f in fields(T):
             entries[f.name] = to_value(&field(x, f))
         return Value.Object(entries)
     else:
-        comptime assert(False, "json writes texts, numbers, `bool`, structs, `vector`, `dict`, `Optional` and `Value`")
+        comptime assert(False, "json writes texts, numbers, `bool`, structs, enums, `vector`, `dict`, `Optional` and `Value`")
 
 # `value` as JSON text: on one line, or with `indent` spaces per level. `value` is a
 # `Value`, or anything `to_struct` reads.
