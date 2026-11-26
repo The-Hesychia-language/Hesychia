@@ -832,6 +832,24 @@ manual fn find_all(pattern: &str, text: &str) -> vector[str] raises PatternError
             advance = a == b
     return out
 
+# Every match, one after the other, each with its groups:
+# `for m in re.matches("(\\w+)=(\\d+)", text):` then `m.group(1)`, `m.group(2)`.
+manual fn matches(pattern: &str, text: &str) -> vector[Match] raises PatternError:
+    const prog: Program = check compile(pattern)
+    mut out: vector[Match] = []
+    mut start: size = 0
+    mut advance: bool = False
+    while start <= byte_len(text):
+        const slots: vector[i64] = run(&prog, text, start, advance)
+        if len(slots) == 0:
+            start = byte_len(text) + 1
+        else:
+            out.push(match_of(text, &slots, &prog.names))
+            const a: size = size(slots[0])
+            start = size(slots[1])
+            advance = a == start
+    return out
+
 # `text` with every match replaced by `new`, where `\1` to `\9` and `\g<12>` stand for a group
 # or `\g<name>` a named one, and `\\` for a `\`.
 manual fn replace(pattern: &str, text: &str, new: &str) -> str raises PatternError:
