@@ -1163,6 +1163,19 @@ conn = net.connect_tls("example.com", 443)
 test = net.connect_tls("localhost", 8443, verify=False)   # self-signed
 ```
 
+### TLS servers and certificates
+Make a certificate authority, sign a server certificate with it, and serve TLS.
+```python
+ca = net.certificate("Lab CA", authority=True)
+cert = net.certificate("localhost", names=["127.0.0.1"], signer=ca)
+listener = net.listen_tls("0.0.0.0", 8443, cert)
+conn = net.accept(listener)                          # a TLS connection
+
+client = net.connect_tls("localhost", 8443, authority=ca)
+quick = net.certificate("localhost")                 # self-signed
+saved = net.load_certificate("server.pem", "server.key")
+```
+
 ### `binary`
 Read and write numbers in byte buffers, with bounds checks.
 ```python

@@ -1033,6 +1033,25 @@ uint8_t* hsy_net_wrap(int64_t s) {
     return (uint8_t*)c;
 }
 
+/* Server TLS, set by the TLS code when a program makes a TLS listener: an accepted socket is
+   wrapped through the listener's context, and the context freed with the listener. */
+static uint8_t* (*hsy_tls_accept_hook)(int64_t s, uint8_t* context) = NULL;
+static void (*hsy_tls_free_hook)(uint8_t* context) = NULL;
+
+uint8_t* hsy_net_accepted(int64_t s, uint8_t* context);
+void hsy_net_free_context(uint8_t* context);
+
+/* The connection of an accepted socket: TLS when the listener has a context; NULL if its
+   handshake failed. */
+uint8_t* hsy_net_accepted(int64_t s, uint8_t* context) {
+    if (context && hsy_tls_accept_hook) return hsy_tls_accept_hook(s, context);
+    return hsy_net_wrap(s);
+}
+
+void hsy_net_free_context(uint8_t* context) {
+    if (context && hsy_tls_free_hook) hsy_tls_free_hook(context);
+}
+
 /* Bytes in the buffer, waiting for some if it is empty; false at the end, or on a failure. */
 static bool hsy_conn_fill(hsy_conn* c) {
     if (c->pos < c->len) return true;
@@ -1133,6 +1152,8 @@ pub const TLS: &str = r#"#ifndef _WIN32
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 #include <openssl/x509v3.h>
+#include <openssl/pem.h>
+#include <openssl/bn.h>
 
 typedef struct hsy_tls {
     SSL_CTX* ctx;
@@ -1195,15 +1216,33 @@ static void hsy_tls_close(void* tls) {
     ERR_clear_error();
 }
 
+static X509* hsy_tls_read_cert(const char* pem) {
+    BIO* bio = BIO_new_mem_buf(pem, -1);
+    X509* x = bio ? PEM_read_bio_X509(bio, NULL, NULL, NULL) : NULL;
+    BIO_free(bio);
+    return x;
+}
+
+static EVP_PKEY* hsy_tls_read_key(const char* pem) {
+    BIO* bio = BIO_new_mem_buf(pem, -1);
+    EVP_PKEY* k = bio ? PEM_read_bio_PrivateKey(bio, NULL, NULL, NULL) : NULL;
+    BIO_free(bio);
+    return k;
+}
+
 static bool hsy_tls_is_ip(const char* host) {
     unsigned char address[16];
     return inet_pton(AF_INET, host, address) == 1 || inet_pton(AF_INET6, host, address) == 1;
 }
 
-uint8_t* hsy_tls_wrap(int64_t s, const char* host, int32_t verify);
+uint8_t* hsy_tls_wrap(int64_t s, const char* host, int32_t verify, const char* authority);
+uint8_t* hsy_tls_server(const char* cert, const char* key);
+uint8_t* hsy_tls_certificate(const char* name, const char* names, const char* signer_cert,
+                             const char* signer_key, int32_t authority, int32_t days, int32_t rsa);
+int32_t hsy_tls_check(const char* cert, const char* key);
 
 /* Starts TLS on the connected socket `s`, for `host`; NULL on a failure, `s` closed then. */
-uint8_t* hsy_tls_wrap(int64_t s, const char* host, int32_t verify) {
+uint8_t* hsy_tls_wrap(int64_t s, const char* host, int32_t verify, const char* authority) {
     SSL_CTX* ctx = SSL_CTX_new(TLS_client_method());
     SSL* ssl = NULL;
     if (!ctx) goto failed;
@@ -1214,7 +1253,15 @@ uint8_t* hsy_tls_wrap(int64_t s, const char* host, int32_t verify) {
 #endif
     if (verify) {
         SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
-        if (SSL_CTX_set_default_verify_paths(ctx) != 1) goto failed;
+        if (authority) {
+            /* Only certificates this authority signed: the system's are not looked at. */
+            X509* ca = hsy_tls_read_cert(authority);
+            bool added = ca && X509_STORE_add_cert(SSL_CTX_get_cert_store(ctx), ca) == 1;
+            X509_free(ca);
+            if (!added) goto failed;
+        } else if (SSL_CTX_set_default_verify_paths(ctx) != 1) {
+            goto failed;
+        }
     }
     ssl = SSL_new(ctx);
     if (!ssl || SSL_set_fd(ssl, (int)s) != 1) goto failed;
@@ -1249,6 +1296,204 @@ failed:
     if (ctx) SSL_CTX_free(ctx);
     hsy_sock_close((hsy_sock)s);
     return NULL;
+}
+
+/* --- server side ------------------------------------------------------------------------- */
+
+static void hsy_tls_reason(const char* text) {
+    snprintf(hsy_net_reason, sizeof hsy_net_reason, "%s", text);
+    ERR_clear_error();
+}
+
+/* 0 when `cert` and `key` are a PEM certificate and the private key that goes with it. */
+int32_t hsy_tls_check(const char* cert, const char* key) {
+    X509* x = hsy_tls_read_cert(cert);
+    EVP_PKEY* k = hsy_tls_read_key(key);
+    int32_t result = 0;
+    if (!x) {
+        hsy_tls_reason("not a PEM certificate");
+        result = -1;
+    } else if (!k) {
+        hsy_tls_reason("not a PEM private key");
+        result = -1;
+    } else if (X509_check_private_key(x, k) != 1) {
+        hsy_tls_reason("the key does not go with the certificate");
+        result = -1;
+    }
+    X509_free(x);
+    EVP_PKEY_free(k);
+    return result;
+}
+
+static uint8_t* hsy_tls_accept(int64_t s, uint8_t* context) {
+    SSL* ssl = SSL_new((SSL_CTX*)context);
+    if (!ssl || SSL_set_fd(ssl, (int)s) != 1) {
+        hsy_tls_failed(NULL, 0, "setup");
+        if (ssl) SSL_free(ssl);
+        hsy_sock_close((hsy_sock)s);
+        return NULL;
+    }
+    int done = SSL_accept(ssl);
+    if (done != 1) {
+        hsy_tls_failed(ssl, done, "handshake");
+        SSL_free(ssl);
+        hsy_sock_close((hsy_sock)s);
+        return NULL;
+    }
+    hsy_tls* t = hsy_alloc(sizeof *t);
+    SSL_CTX_up_ref((SSL_CTX*)context);
+    t->ctx = (SSL_CTX*)context;
+    t->ssl = ssl;
+    hsy_conn* c = (hsy_conn*)hsy_net_wrap(s);
+    c->tls = t;
+    c->tls_recv = hsy_tls_recv;
+    c->tls_send = hsy_tls_send;
+    c->tls_close = hsy_tls_close;
+    return (uint8_t*)c;
+}
+
+static void hsy_tls_free_context(uint8_t* context) { SSL_CTX_free((SSL_CTX*)context); }
+
+/* A context for accepting TLS connections with `cert` and `key` (PEM); NULL on a failure. */
+uint8_t* hsy_tls_server(const char* cert, const char* key) {
+    if (hsy_tls_check(cert, key) != 0) return NULL;
+    SSL_CTX* ctx = SSL_CTX_new(TLS_server_method());
+    X509* x = hsy_tls_read_cert(cert);
+    EVP_PKEY* k = hsy_tls_read_key(key);
+    bool ok = ctx && x && k && SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION) == 1 &&
+              SSL_CTX_use_certificate(ctx, x) == 1 && SSL_CTX_use_PrivateKey(ctx, k) == 1;
+    X509_free(x);
+    EVP_PKEY_free(k);
+    if (!ok) {
+        hsy_tls_failed(NULL, 0, "setup");
+        SSL_CTX_free(ctx);
+        return NULL;
+    }
+    hsy_tls_accept_hook = hsy_tls_accept;
+    hsy_tls_free_hook = hsy_tls_free_context;
+    return (uint8_t*)ctx;
+}
+
+static bool hsy_tls_extend(X509* x, X509* issuer, int nid, const char* value) {
+    X509V3_CTX v3;
+    X509V3_set_ctx_nodb(&v3);
+    X509V3_set_ctx(&v3, issuer, x, NULL, NULL, 0);
+    X509_EXTENSION* ext = X509V3_EXT_conf_nid(NULL, &v3, nid, value);
+    if (!ext) return false;
+    bool ok = X509_add_ext(x, ext, -1) == 1;
+    X509_EXTENSION_free(ext);
+    return ok;
+}
+
+/* Adds one name of `n` bytes to a subjectAltName list, as an IP address or a DNS name. */
+static bool hsy_tls_add_alt(char* out, const char* one, size_t n) {
+    char name[256];
+    if (n == 0) return true;
+    if (n >= sizeof name) return false;
+    memcpy(name, one, n);
+    name[n] = 0;
+    if (out[0]) strcat(out, ",");
+    strcat(out, hsy_tls_is_ip(name) ? "IP:" : "DNS:");
+    strcat(out, name);
+    return true;
+}
+
+/* The subjectAltName of a server certificate: `name`, then each line of `names`. */
+static char* hsy_tls_alt_names(const char* name, const char* names) {
+    char* out = malloc(strlen(name) * 2 + strlen(names) * 6 + 16);
+    if (!out) return NULL;
+    out[0] = 0;
+    bool ok = hsy_tls_add_alt(out, name, strlen(name));
+    const char* start = names;
+    while (ok && *start) {
+        const char* end = strchr(start, '\n');
+        if (!end) end = start + strlen(start);
+        ok = hsy_tls_add_alt(out, start, (size_t)(end - start));
+        start = *end ? end + 1 : end;
+    }
+    if (!ok) {
+        free(out);
+        return NULL;
+    }
+    return out;
+}
+
+/* A new certificate for `name` (and the other `names`, one per line) with its own new key, as
+   PEM text: the certificate, then the key. Signed by `signer_cert`/`signer_key`, or by itself
+   when they are NULL. NULL on a failure, with the reason kept. */
+uint8_t* hsy_tls_certificate(const char* name, const char* names, const char* signer_cert,
+                             const char* signer_key, int32_t authority, int32_t days, int32_t rsa) {
+    EVP_PKEY* key = rsa ? EVP_RSA_gen(3072) : EVP_EC_gen("P-256");
+    X509* x = X509_new();
+    X509* issuer = NULL;
+    EVP_PKEY* issuer_key = NULL;
+    BIGNUM* serial = BN_new();
+    BIO* out = NULL;
+    char* alt = NULL;
+    uint8_t* text = NULL;
+    const char* reason = NULL;
+    if (!key || !x || !serial) goto done;
+    if (signer_cert) {
+        if (hsy_tls_check(signer_cert, signer_key) != 0) {
+            reason = "the signer is not a certificate and its key";
+            goto done;
+        }
+        issuer = hsy_tls_read_cert(signer_cert);
+        issuer_key = hsy_tls_read_key(signer_key);
+        if (X509_check_ca(issuer) == 0) {
+            reason = "the signer is not an authority: make it with authority=True";
+            goto done;
+        }
+    }
+    X509_set_version(x, 2);
+    if (BN_rand(serial, 127, BN_RAND_TOP_ANY, BN_RAND_BOTTOM_ANY) != 1 ||
+        !BN_to_ASN1_INTEGER(serial, X509_get_serialNumber(x)))
+        goto done;
+    /* A few minutes back, for clocks that are a little behind. */
+    X509_gmtime_adj(X509_getm_notBefore(x), -300);
+    X509_gmtime_adj(X509_getm_notAfter(x), (long)days * 86400);
+    X509_set_pubkey(x, key);
+    X509_NAME* subject = X509_get_subject_name(x);
+    if (X509_NAME_add_entry_by_txt(subject, "CN", MBSTRING_UTF8, (const unsigned char*)name, -1, -1, 0) != 1)
+        goto done;
+    X509_set_issuer_name(x, issuer ? X509_get_subject_name(issuer) : subject);
+    X509* signing = issuer ? issuer : x;
+    bool ok = hsy_tls_extend(x, signing, NID_subject_key_identifier, "hash") &&
+              hsy_tls_extend(x, signing, NID_authority_key_identifier, "keyid:always");
+    if (authority) {
+        ok = ok && hsy_tls_extend(x, signing, NID_basic_constraints, "critical,CA:TRUE") &&
+             hsy_tls_extend(x, signing, NID_key_usage, "critical,keyCertSign,cRLSign,digitalSignature");
+    } else {
+        alt = hsy_tls_alt_names(name, names);
+        ok = ok && alt && hsy_tls_extend(x, signing, NID_basic_constraints, "critical,CA:FALSE") &&
+             hsy_tls_extend(x, signing, NID_key_usage, rsa ? "critical,digitalSignature,keyEncipherment" : "critical,digitalSignature") &&
+             hsy_tls_extend(x, signing, NID_ext_key_usage, "serverAuth,clientAuth") &&
+             hsy_tls_extend(x, signing, NID_subject_alt_name, alt);
+    }
+    if (!ok || X509_sign(x, issuer_key ? issuer_key : key, EVP_sha256()) == 0) goto done;
+    out = BIO_new(BIO_s_mem());
+    if (!out || PEM_write_bio_X509(out, x) != 1 || PEM_write_bio_PrivateKey(out, key, NULL, NULL, 0, NULL, NULL) != 1)
+        goto done;
+    char* data = NULL;
+    long n = BIO_get_mem_data(out, &data);
+    text = malloc((size_t)n + 1);
+    if (text) {
+        memcpy(text, data, (size_t)n);
+        text[n] = 0;
+    }
+done:
+    if (!text) {
+        if (reason) hsy_tls_reason(reason);
+        else hsy_tls_failed(NULL, 0, "certificate");
+    }
+    free(alt);
+    BIO_free(out);
+    BN_free(serial);
+    X509_free(x);
+    X509_free(issuer);
+    EVP_PKEY_free(issuer_key);
+    EVP_PKEY_free(key);
+    return text;
 }
 
 "#;
