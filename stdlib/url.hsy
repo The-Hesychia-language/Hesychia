@@ -187,6 +187,30 @@ manual fn encode(text: &str) -> str:
 manual fn decode(text: &str) -> str:
     return decoded(text, 0, byte_len(text), False)
 
+# The pairs of `fields` as a query or a form body writes them: `name=value`, joined by `&`,
+# each encoded. A `dict[str, vector[str]]`, as `Url.query` is, writes a name once per value.
+# `http.post(address, url.encode_form(&fields).bytes())` sends a form.
+manual fn encode_form[V](fields: &dict[str, V]) -> str:
+    mut out: str = ""
+    for name, value in fields.items():
+        comptime if V == vector:
+            for one in &value:
+                if byte_len(out) > 0:
+                    out += "&"
+                out += f"{encoded(&name, "")}={encoded(one, "")}"
+        else:
+            if byte_len(out) > 0:
+                out += "&"
+            out += f"{encoded(&name, "")}={encoded(&value, "")}"
+    return out
+
+# The pairs of a query or a form body, `a=1&b=2&b=3`, decoded, a `+` being a space: each name
+# with its values in order, as `Url.query` holds them.
+manual fn decode_form(text: &str) -> dict[str, vector[str]]:
+    mut fields: dict[str, vector[str]] = dict()
+    read_query(text, 0, byte_len(text), &mut fields)
+    return fields
+
 # --- parse -----------------------------------------------------------------------------------
 
 # How many bytes the scheme of `text` takes, without its `:`; 0 if it has none.
@@ -292,17 +316,10 @@ manual fn to_text(u: &Url) -> str:
         if u.port is not None:
             out += f":{u.port}"
     out += path_text(u)
-    mut first: bool = True
-    for name, values in u.query.items():
-        for value in &values:
-            if first:
-                out += "?"
-                first = False
-            else:
-                out += "&"
-            out += encoded(&name, "")
-            out += "="
-            out += encoded(value, "")
+    const query: str = encode_form(&u.query)
+    if byte_len(query) > 0:
+        out += "?"
+        out += query
     if len(u.fragment) > 0:
         out += "#"
         out += encoded(&u.fragment, "/?!$&'()*+,;=:@")
