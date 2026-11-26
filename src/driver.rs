@@ -149,8 +149,9 @@ pub fn build(input: &Input, options: &BuildOptions, build: &Build) -> Result<Pat
     let intel = c_code.contains("__asm__ volatile");
     let threads = c_code.contains("#include <pthread.h>");
     let net = c_code.contains("#include <winsock2.h>");
+    let tls = c_code.contains("#include <openssl/ssl.h>");
     let flags =
-        CFlags { release: options.release, intel_asm: intel, threads, net, links: &input.project.links };
+        CFlags { release: options.release, intel_asm: intel, threads, net, tls, links: &input.project.links };
     let result = run_c_compiler(&compiler, build.platform, &c_path, &output, &flags);
     if !options.emit_c {
         let _ = fs::remove_file(&c_path);
@@ -198,6 +199,8 @@ struct CFlags<'a> {
     threads: bool,
     /// Sockets are used: on Windows they are in their own library.
     net: bool,
+    /// TLS connections are made: OpenSSL is linked, and on Windows the system's certificate API.
+    tls: bool,
     /// `[settings] links`, after the code that uses them.
     links: &'a [String],
 }
@@ -216,8 +219,10 @@ fn run_c_compiler(
         .args(c_flags(platform, flags.release))
         .args(flags.intel_asm.then_some("-masm=intel"))
         .args(flags.threads.then_some("-pthread"))
-        .args((flags.net && platform.os == "windows").then_some("-lws2_32"))
         .args(flags.links.iter().map(|name| format!("-l{name}")))
+        .args(if flags.tls { &["-lssl", "-lcrypto"][..] } else { &[] })
+        .args((flags.tls && platform.os == "windows").then_some("-lcrypt32"))
+        .args((flags.net && platform.os == "windows").then_some("-lws2_32"))
         .arg("-lm")
         .status()
         .map_err(|e| format!("cannot run the C compiler `{compiler}` for {platform}: {e}"))?;

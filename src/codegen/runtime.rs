@@ -1007,11 +1007,17 @@ const uint8_t* hsy_net_sender(void) { return (const uint8_t*)hsy_net_name; }
 
 void hsy_net_close(int64_t s) { hsy_sock_close((hsy_sock)s); }
 
-/* A connection as `io` reads it: through a buffer. */
+/* A connection as `io` reads it: through a buffer. `tls`, when set, is the TLS session that
+   reads and writes go through, with its own functions: the code that sets it is only in the
+   programs that open TLS connections, and only they are linked with the TLS library. */
 typedef struct hsy_conn {
     hsy_sock sock;
     size_t len, pos;
     bool failed;
+    void* tls;
+    long (*tls_recv)(void* tls, uint8_t* out, size_t n);
+    long (*tls_send)(void* tls, const uint8_t* data, size_t n);
+    void (*tls_close)(void* tls);
     uint8_t data[4096];
 } hsy_conn;
 
@@ -1020,6 +1026,10 @@ uint8_t* hsy_net_wrap(int64_t s) {
     c->sock = (hsy_sock)s;
     c->len = c->pos = 0;
     c->failed = false;
+    c->tls = NULL;
+    c->tls_recv = NULL;
+    c->tls_send = NULL;
+    c->tls_close = NULL;
     return (uint8_t*)c;
 }
 
@@ -1027,6 +1037,16 @@ uint8_t* hsy_net_wrap(int64_t s) {
 static bool hsy_conn_fill(hsy_conn* c) {
     if (c->pos < c->len) return true;
     for (;;) {
+        if (c->tls) {
+            long n = c->tls_recv(c->tls, c->data, sizeof c->data);
+            if (n > 0) {
+                c->pos = 0;
+                c->len = (size_t)n;
+                return true;
+            }
+            if (n < 0) c->failed = true;
+            return false;
+        }
         long n = (long)recv(c->sock, (char*)c->data, (int)sizeof c->data, 0);
         if (n > 0) {
             c->pos = 0;
@@ -1069,6 +1089,7 @@ int hsy_conn_failed(uint8_t* conn) { return ((hsy_conn*)conn)->failed; }
 
 int hsy_conn_write(uint8_t* conn, const uint8_t* data, size_t n) {
     hsy_conn* c = (hsy_conn*)conn;
+    if (c->tls) return n == 0 ? 0 : (c->tls_send(c->tls, data, n) < 0 ? -1 : 0);
     while (n > 0) {
         long sent = (long)send(c->sock, (const char*)data, (int)(n > 65536 ? 65536 : n), HSY_NO_SIGNAL);
 #ifndef _WIN32
@@ -1086,6 +1107,7 @@ int hsy_conn_write(uint8_t* conn, const uint8_t* data, size_t n) {
 
 void hsy_conn_close(uint8_t* conn) {
     hsy_conn* c = (hsy_conn*)conn;
+    if (c->tls) c->tls_close(c->tls);
     hsy_sock_close(c->sock);
     free(c);
 }
@@ -1098,6 +1120,135 @@ void hsy_conn_shutdown(uint8_t* conn) {
 #else
     shutdown(c->sock, SHUT_RDWR);
 #endif
+}
+
+"#;
+
+/// TLS over a `net` connection, through OpenSSL: certificates checked against the system's
+/// trusted ones and the host name, TLS 1.2 at least. Comes after `NET`, whose `hsy_conn` it
+/// fills in.
+pub const TLS: &str = r#"#ifndef _WIN32
+#include <arpa/inet.h>
+#endif
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+#include <openssl/x509v3.h>
+
+typedef struct hsy_tls {
+    SSL_CTX* ctx;
+    SSL* ssl;
+} hsy_tls;
+
+/* Keeps the reason of a TLS failure: the certificate check, the library's, or the system's. */
+static void hsy_tls_failed(SSL* ssl, int result, const char* doing) {
+    long verified = ssl ? SSL_get_verify_result(ssl) : X509_V_OK;
+    unsigned long code = ERR_peek_last_error();
+    int kind = ssl ? SSL_get_error(ssl, result) : SSL_ERROR_SSL;
+    if (verified != X509_V_OK) {
+        snprintf(hsy_net_reason, sizeof hsy_net_reason, "certificate rejected: %s",
+                 X509_verify_cert_error_string(verified));
+    } else if (kind == SSL_ERROR_WANT_READ || kind == SSL_ERROR_WANT_WRITE) {
+        /* A blocking socket only asks to wait again when its time limit is reached. */
+        snprintf(hsy_net_reason, sizeof hsy_net_reason, "timed out");
+    } else if (kind == SSL_ERROR_SYSCALL && code == 0) {
+        hsy_net_failed();
+        if (result == 0) snprintf(hsy_net_reason, sizeof hsy_net_reason, "connection closed during %s", doing);
+    } else if (code != 0) {
+        char text[200];
+        ERR_error_string_n(code, text, sizeof text);
+        snprintf(hsy_net_reason, sizeof hsy_net_reason, "TLS %s failed: %s", doing, text);
+    } else {
+        snprintf(hsy_net_reason, sizeof hsy_net_reason, "TLS %s failed", doing);
+    }
+    ERR_clear_error();
+}
+
+static long hsy_tls_recv(void* tls, uint8_t* out, size_t n) {
+    SSL* ssl = ((hsy_tls*)tls)->ssl;
+    int got = SSL_read(ssl, out, n > 65536 ? 65536 : (int)n);
+    if (got > 0) return got;
+    if (SSL_get_error(ssl, got) == SSL_ERROR_ZERO_RETURN) return 0;
+    hsy_tls_failed(ssl, got, "read");
+    return -1;
+}
+
+static long hsy_tls_send(void* tls, const uint8_t* data, size_t n) {
+    SSL* ssl = ((hsy_tls*)tls)->ssl;
+    while (n > 0) {
+        int sent = SSL_write(ssl, data, n > 65536 ? 65536 : (int)n);
+        if (sent <= 0) {
+            hsy_tls_failed(ssl, sent, "write");
+            return -1;
+        }
+        data += sent;
+        n -= (size_t)sent;
+    }
+    return 0;
+}
+
+static void hsy_tls_close(void* tls) {
+    hsy_tls* t = tls;
+    SSL_shutdown(t->ssl);
+    SSL_free(t->ssl);
+    SSL_CTX_free(t->ctx);
+    free(t);
+    ERR_clear_error();
+}
+
+static bool hsy_tls_is_ip(const char* host) {
+    unsigned char address[16];
+    return inet_pton(AF_INET, host, address) == 1 || inet_pton(AF_INET6, host, address) == 1;
+}
+
+uint8_t* hsy_tls_wrap(int64_t s, const char* host, int32_t verify);
+
+/* Starts TLS on the connected socket `s`, for `host`; NULL on a failure, `s` closed then. */
+uint8_t* hsy_tls_wrap(int64_t s, const char* host, int32_t verify) {
+    SSL_CTX* ctx = SSL_CTX_new(TLS_client_method());
+    SSL* ssl = NULL;
+    if (!ctx) goto failed;
+    SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION);
+#ifdef SSL_OP_IGNORE_UNEXPECTED_EOF
+    /* Many servers close without telling TLS first; HTTP lengths catch a cut answer. */
+    SSL_CTX_set_options(ctx, SSL_OP_IGNORE_UNEXPECTED_EOF);
+#endif
+    if (verify) {
+        SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
+        if (SSL_CTX_set_default_verify_paths(ctx) != 1) goto failed;
+    }
+    ssl = SSL_new(ctx);
+    if (!ssl || SSL_set_fd(ssl, (int)s) != 1) goto failed;
+    bool ip = hsy_tls_is_ip(host);
+    if (!ip) SSL_set_tlsext_host_name(ssl, host);
+    if (verify) {
+        X509_VERIFY_PARAM* param = SSL_get0_param(ssl);
+        X509_VERIFY_PARAM_set_hostflags(param, X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
+        if ((ip ? X509_VERIFY_PARAM_set1_ip_asc(param, host) : X509_VERIFY_PARAM_set1_host(param, host, 0)) != 1)
+            goto failed;
+    }
+    int done = SSL_connect(ssl);
+    if (done != 1) {
+        hsy_tls_failed(ssl, done, "handshake");
+        SSL_free(ssl);
+        SSL_CTX_free(ctx);
+        hsy_sock_close((hsy_sock)s);
+        return NULL;
+    }
+    hsy_tls* t = hsy_alloc(sizeof *t);
+    t->ctx = ctx;
+    t->ssl = ssl;
+    hsy_conn* c = (hsy_conn*)hsy_net_wrap(s);
+    c->tls = t;
+    c->tls_recv = hsy_tls_recv;
+    c->tls_send = hsy_tls_send;
+    c->tls_close = hsy_tls_close;
+    return (uint8_t*)c;
+failed:
+    hsy_tls_failed(NULL, 0, "setup");
+    if (ssl) SSL_free(ssl);
+    if (ctx) SSL_CTX_free(ctx);
+    hsy_sock_close((hsy_sock)s);
+    return NULL;
 }
 
 "#;

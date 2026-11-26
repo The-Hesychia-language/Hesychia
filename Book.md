@@ -1144,6 +1144,13 @@ print("GET / HTTP/1.0\r\n\r\n", to=conn)
 reply = io.read(conn, end="")
 ```
 
+### TLS
+The same connection, encrypted; the certificate is checked.
+```python
+conn = net.connect_tls("example.com", 443)
+test = net.connect_tls("localhost", 8443, verify=False)   # self-signed
+```
+
 ### `binary`
 Read and write numbers in byte buffers, with bounds checks.
 ```python

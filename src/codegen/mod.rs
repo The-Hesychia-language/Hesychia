@@ -520,9 +520,12 @@ impl Emitter<'_> {
                 if e.symbol.starts_with("hsy_case_") {
                     self.types.uses_case = true;
                 }
-                if e.symbol.starts_with("hsy_net_") {
+                if e.symbol.starts_with("hsy_net_") || e.symbol.starts_with("hsy_tls_") {
                     self.types.uses_net = true;
                     self.types.uses_alloc = true;
+                }
+                if e.symbol.starts_with("hsy_tls_") {
+                    self.types.uses_tls = true;
                 }
                 out += &self.extern_declaration(e);
             }
