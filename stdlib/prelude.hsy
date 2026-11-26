@@ -171,6 +171,13 @@ extend str:
             h = (h ^ u64(self.byte(i))).wrapping_mul(1099511628211)
         return hash_finish(h)
 
+    # The UTF-8 bytes of the text; `str.from_bytes` gives it back.
+    method bytes(&self) -> vector[u8]:
+        mut out: vector[u8] = []
+        for i in range(byte_len(self)):
+            out.push(self.byte(i))
+        return out
+
     method starts_with(&self, prefix: &str) -> bool:
         if byte_len(prefix) > byte_len(self):
             return False

@@ -128,6 +128,8 @@ s = "été"
 len(s)          # 3
 byte_len(s)     # 5
 s = s + "!"
+data = s.bytes()           # vector[u8], the UTF-8 bytes
+back = str.from_bytes(data)  # Optional[str]
 ```
 
 ### f-strings
@@ -1113,6 +1115,20 @@ import url
 
 u = url.parse("https://a.com:8080/p?q=1")
 print(f"{u.host} {u.port}")
+```
+
+### `html`
+Read the tags and the text of a page, given as bytes.
+```python
+import html
+
+for tag in html.tags(page):
+    if tag.name == "a":
+        href = html.attribute(tag, "href")   # Optional[str]
+        if href is not None:
+            print(href)
+print(html.text(page))
+safe = html.escape(name.bytes())
 ```
 
 ### `net`

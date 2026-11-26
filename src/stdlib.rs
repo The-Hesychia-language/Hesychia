@@ -19,6 +19,7 @@ const MODULES: &[(&str, &str)] = &[
     ("net", include_str!("../stdlib/net.hsy")),
     ("re", include_str!("../stdlib/re.hsy")),
     ("url", include_str!("../stdlib/url.hsy")),
+    ("html", include_str!("../stdlib/html.hsy")),
     ("args", include_str!("../stdlib/args.hsy")),
     ("binary", include_str!("../stdlib/binary.hsy")),
     ("elf", include_str!("../stdlib/elf.hsy")),
