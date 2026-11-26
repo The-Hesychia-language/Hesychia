@@ -234,7 +234,7 @@ The standard library is written in Hesychia, in `stdlib/`, and built into `hsy`:
 | `dict[K, V]` | `d = dict[str, i32]()`, `d[k] = v`, `d[k] += 1`, `k in d`, `len(d)`, `get`, `remove`, `clear`, `keys`, `values`, `items`, in the order entries were added; a missing key in `d[k]` stops the program; written `{'a': 1}` |
 | `set[T]` | `add`, `remove`, `in`, `len`, `clear`, `values`, `union`, `intersection`; written `{1, 2}`, or `set()` when empty |
 | functions | `min(a, b)` and `min(v)` (`None` for an empty vector), the same for `max`, `sum(v)`, `sum(v, start)` |
-| conversions | `i64("42")`, `u8(s)`, `f64("2.5e1")`... raise `ParseError`, with the `text` read and a `reason` (`not a whole number`, ``too large for `u8` ``); spaces around are allowed; `str(x)` writes `x` as `f"{x}"` does |
+| conversions | `i64("42")`, `u8(s)`, `f64("2.5e1")`... raise `ParseError`, with the `text` read and a `reason` (`not a whole number`, ``too large for `u8` ``); spaces around are allowed; `i64(text, base=16)` reads another base, from 2 to 36, where `0x` (16), `0o` (8) or `0b` (2) may start the digits: `u64("0x401000", base=16)`; `str(x)` writes `x` as `f"{x}"` does |
 
 | Module | |
 |---|---|

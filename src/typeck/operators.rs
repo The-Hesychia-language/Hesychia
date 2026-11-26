@@ -122,13 +122,21 @@ impl Checker<'_> {
         }
     }
 
-    /// `i64(s)` on a `str`: the prelude's `parse_i64(s)`, which raises `ParseError`.
-    pub(super) fn check_parse(&mut self, expr: &mut Expr, text: Expr, target: &Type) -> Result<Type> {
+    /// `i64(s)` on a `str`: the prelude's `parse_i64(s)`, which raises `ParseError`; with
+    /// `base=16`, `parse_i64(s, base=16)`.
+    pub(super) fn check_parse(
+        &mut self,
+        expr: &mut Expr,
+        text: Expr,
+        base: Option<Expr>,
+        target: &Type,
+    ) -> Result<Type> {
         let callee = format!("parse_{target}");
         let index = self
             .prelude_fn(&callee)
             .ok_or_else(|| Diagnostic::error(expr.span, format!("cannot read a `{target}` from a `str`")))?;
-        let args = vec![self.as_key(text)];
+        let mut args = vec![self.as_key(text)];
+        args.extend(base);
         // Errors name the call as written; the C name comes from the function itself.
         let callee = target.to_string();
         expr.kind = ExprKind::Call { callee, type_args: Vec::new(), args, target: None };

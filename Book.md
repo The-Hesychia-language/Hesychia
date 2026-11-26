@@ -121,6 +121,11 @@ try:
 except ParseError as e:
     print(e.reason)               # too large for `u8`
 ```
+`base=` reads another base; its prefix is allowed:
+```python
+addr = u64("0x401000", base=16)
+mask = u8("0b1010", base=2)
+```
 
 ---
 
