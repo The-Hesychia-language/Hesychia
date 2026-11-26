@@ -1,0 +1,3 @@
+managed fn main():
+    x = f64("1.5", base=16)
+# error: `base=` reads a text as a whole number

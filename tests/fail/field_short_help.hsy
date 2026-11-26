@@ -1,0 +1,7 @@
+manual struct O:
+    @short("h")
+    a: bool = False
+
+manual fn main():
+    pass
+# error: `@short("h")` is not one letter or digit other than `h`

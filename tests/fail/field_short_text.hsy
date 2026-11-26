@@ -1,0 +1,7 @@
+manual struct O:
+    @short(1)
+    a: bool = False
+
+manual fn main():
+    pass
+# error: write `@short("...")`

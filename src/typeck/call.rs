@@ -386,7 +386,13 @@ impl Checker<'_> {
     /// Rewrites `T(x)` into a conversion and checks it.
     fn check_conversion(&mut self, expr: &mut Expr, target: Type) -> Result<Type> {
         let ExprKind::Call { args, .. } = &mut expr.kind else { unreachable!("called on a call") };
-        let [arg] = std::mem::take(args).try_into().map_err(|_: Vec<Expr>| {
+        let mut args = std::mem::take(args);
+        // `i64(text, base=16)`: the base a text is read in.
+        let base = match args.last().map(|a| &a.kind) {
+            Some(ExprKind::Named { name, .. }) if name == "base" && args.len() == 2 => args.pop(),
+            _ => None,
+        };
+        let [arg] = args.try_into().map_err(|_: Vec<Expr>| {
             Diagnostic::error(expr.span, format!("`{target}(...)` takes exactly one value"))
         })?;
         let original = arg.clone();
@@ -397,8 +403,13 @@ impl Checker<'_> {
             Type::Ref(inner, _) => inner.as_ref() == &Type::Str,
             ty => *ty == Type::Str,
         };
+        if let Some(base) = &base
+            && !(text && matches!(target, Type::Int(_)))
+        {
+            return Err(Diagnostic::error(base.span, "`base=` reads a text as a whole number"));
+        }
         if text && target.is_numeric() {
-            return self.check_parse(expr, original, &target);
+            return self.check_parse(expr, original, base, &target);
         }
         if !source.is_numeric() || !target.is_numeric() {
             return Err(Diagnostic::error(expr.span, format!("cannot convert `{source}` to `{target}`")));

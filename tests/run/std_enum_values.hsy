@@ -1,0 +1,45 @@
+from io import print
+import args
+import json
+
+managed enum Mode:
+    Fast
+    DryRun
+
+manual struct Options:
+    # How to run
+    mode: Mode = Mode.Fast
+    level: Optional[Mode]
+
+manual struct Job:
+    name: str
+    mode: Mode
+
+managed fn parse(words: vector[str]):
+    try:
+        o = args.to_struct[Options](words)
+        print(f"{o.mode} {o.level}")
+    except ArgsError as e:
+        print(f"error: {e.reason}")
+
+managed fn main():
+    parse(vector[str]())
+    parse(["--mode", "dry-run", "--level=fast"])
+    parse(["--mode", "slow"])
+    print(args.help[Options]("run").replace("\n\n", "\n.\n"))
+    job = json.to_struct[Job]("{\"name\": \"x\", \"mode\": \"dry-run\"}")
+    print(f"{job.mode} {json.to_text(job)}")
+    try:
+        json.to_struct[Job]("{\"name\": \"x\", \"mode\": \"slow\"}")
+    except JsonError as e:
+        print(e.reason)
+# expect: Mode.Fast None
+# expect: Mode.DryRun Mode.Fast
+# expect: error: --mode: `slow` is not one of fast, dry-run
+# expect: Usage: run [options]
+# expect: .
+# expect:   --mode <fast|dry-run>    How to run (default: fast)
+# expect:   --level <fast|dry-run>
+# expect:   --help                   Show this help
+# expect: Mode.DryRun {"name":"x","mode":"dry-run"}
+# expect: mode: expected one of "fast", "dry-run"

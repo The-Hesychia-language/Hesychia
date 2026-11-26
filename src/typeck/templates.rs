@@ -218,6 +218,7 @@ impl Tables {
                 private: field.private,
                 default: None,
                 doc: field.doc.clone(),
+                decorators: field.decorators.clone(),
             });
         }
         self.types.structs[id].fields = fields;
@@ -397,7 +398,7 @@ impl Tables {
                     return Err(Diagnostic::error(field.span, "a field cannot hold a reference"));
                 }
                 let doc = field.doc.clone();
-                fields.push(FieldDef { name: field.name.clone(), ty, private: false, default: None, doc });
+                fields.push(FieldDef { name: field.name.clone(), ty, private: false, default: None, doc, decorators: Vec::new() });
             }
             variants.push(VariantDef { name: variant.name.clone(), fields, doc: variant.doc.clone() });
         }

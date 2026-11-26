@@ -1,0 +1,19 @@
+from io import print
+manual fn show(text: &str, base: u32):
+    try:
+        print(f"{check u64(text, base=base)}")
+    except ParseError as e:
+        print(f"{e.reason}")
+managed fn main():
+    print(f"{i64("ff", base=16)} {u64("0x401000", base=16)} {i32("-0b101", base=2)} {u8("0o17", base=8)} {i64("Zz", base=36)} {i64("42")}")
+    show("0x", 16)
+    show("12", 2)
+    show("1", 1)
+    show("0x10", 10)
+    show("10000000000000000", 16)
+# expect: 255 4198400 -5 15 1295 42
+# expect: no digits
+# expect: not a whole number in base 2
+# expect: the base 1 is not from 2 to 36
+# expect: not a whole number
+# expect: too large for `u64`

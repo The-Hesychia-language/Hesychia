@@ -4,9 +4,11 @@
 import io
 from io import File, IoError, print, stdout
 
-# Text that is not a well-formed table.
+# Text that is not a well-formed table, or a row that does not fit a struct. `line` counts
+# from 1 (0 for the separator); `column` names the column at fault, "" when there is none.
 manual struct CsvError:
     line: size
+    column: str
     reason: str
 
 # Bytes cut from valid text at ASCII separators are valid text.
@@ -18,7 +20,7 @@ priv manual fn field_of(bytes: &vector[u8]) -> str:
 
 priv manual fn check_sep(sep: &str) raises CsvError:
     if byte_len(sep) != 1 or sep == "\"" or sep == "\n" or sep == "\r":
-        raise CsvError(line=0, reason="the separator is one character, not a quote or a line break")
+        raise CsvError(line=0, column="", reason="the separator is one character, not a quote or a line break")
 
 # What `load[R]` gives for each row.
 priv comptime fn row(R: type) -> type:
@@ -26,22 +28,32 @@ priv comptime fn row(R: type) -> type:
         return dict[str, str]
     if R == vector:
         return vector[str]
-    panic("csv: load each row as a `vector` or a `dict`")
+    if is_struct(R):
+        return R
+    panic("csv: read each row as a `vector`, a `dict` or a struct")
 
-# The rows of the file. `load[vector](f)` gives each as a vector of fields; `load[dict](f)` gives
-# each row after the first as a dict from the first row's names to its fields. `sep` is one
-# character such as "," or ";".
+# The rows of the file, as `parse` reads them.
 manual fn load[R](f: &File, sep: &str = ",") -> vector[row(R)] raises CsvError | IoError:
     const text: Optional[str] = check io.read(f, end="")
-    mut rows: vector[vector[str]] = []
-    if text is not None:
-        rows = check parse(&text, sep)
+    if text is None:
+        return []
+    return check parse[R](&text, sep)
+
+# The rows written in `text`. `parse[vector](text)` gives each as a vector of fields;
+# `parse[dict](text)` gives each row after the first as a dict from the first row's names to
+# its fields; `parse[User](text)` gives each row after the first as a `User`, each field from
+# the column of its name. `sep` is one character such as "," or ";".
+manual fn parse[R](text: &str, sep: &str = ",") -> vector[row(R)] raises CsvError:
+    const rows: vector[vector[str]] = check fields_of(text, sep)
     comptime if R == dict:
         return check records(&rows)
-    else:
+    elif R == vector:
         return rows
+    else:
+        return check structs[R](&rows)
 
-priv manual fn parse(text: &str, sep: &str) -> vector[vector[str]] raises CsvError:
+# Each line of `text` cut into its fields.
+priv manual fn fields_of(text: &str, sep: &str) -> vector[vector[str]] raises CsvError:
     check check_sep(sep)
     const split: u8 = sep.byte(0)
     const n: size = byte_len(text)
@@ -67,7 +79,7 @@ priv manual fn parse(text: &str, sep: &str) -> vector[vector[str]] raises CsvErr
                 field.push(b)
         elif b == 34:
             if len(field) > 0:
-                raise CsvError(line=line, reason="a quote inside a field that is not quoted")
+                raise CsvError(line=line, column="", reason="a quote inside a field that is not quoted")
             quoted = True
             started = True
         elif b == split:
@@ -88,7 +100,7 @@ priv manual fn parse(text: &str, sep: &str) -> vector[vector[str]] raises CsvErr
             started = True
         i += 1
     if quoted:
-        raise CsvError(line=line, reason="a quoted field is not closed")
+        raise CsvError(line=line, column="", reason="a quoted field is not closed")
     if started or len(field) > 0:
         rows[len(rows) - 1].push(field_of(&field))
     else:
@@ -101,12 +113,136 @@ priv manual fn records(rows: &vector[vector[str]]) -> vector[dict[str, str]] rai
         return records
     for r in range(1, len(rows)):
         if len(rows[r]) != len(rows[0]):
-            raise CsvError(line=r + 1, reason=f"{len(rows[r])} fields where the header has {len(rows[0])}")
+            raise CsvError(line=r + 1, column="", reason=f"{len(rows[r])} fields where the header has {len(rows[0])}")
         mut record: dict[str, str] = dict()
         for c in range(len(rows[0])):
             record[f"{rows[0][c]}"] = f"{rows[r][c]}"
         records.push(record)
     return records
+
+# --- structs ---------------------------------------------------------------------------
+# A struct is a row: each field from the column of its name. A field can be a text, a number,
+# a `bool` (`true` or `false`), a `managed enum` (`Mode.DryRun` is `dry-run`) or an `Optional`
+# of them, for which an empty cell is `None`. Columns that name no field are passed over; a
+# field with a default or an `Optional` may have no column.
+
+# The name of the case `name` in a cell: `DryRun` is "dry-run".
+priv manual fn case_text(name: &str) -> str:
+    mut out: vector[u8] = []
+    for i in range(byte_len(name)):
+        const b: u8 = name.byte(i)
+        if b >= 65 and b <= 90:
+            if i > 0:
+                out.push(45)
+            out.push(b + 32)
+        else:
+            out.push(b)
+    return field_of(&out)
+
+# What a cell that does not fit raises: the column and line are added where it is read.
+priv manual fn refused(reason: &str) -> CsvError:
+    return CsvError(line=0, column="", reason=f"{reason}")
+
+# Sets `out` from the text of a cell.
+priv manual fn fill[T](out: &mut T, cell: &str) raises CsvError:
+    comptime if T == str:
+        out = cell.copy()
+    elif T == bool:
+        if cell == "true":
+            out = True
+        elif cell == "false":
+            out = False
+        else:
+            raise refused(f"`{cell}`: expected true or false")
+    elif is_int(T):
+        try:
+            const fit: Optional[T] = T.checked(check i128(cell))
+            if fit is None:
+                raise refused(f"`{cell}` does not fit the field's type")
+            out = fit
+        except ParseError as e:
+            raise refused(f"`{cell}`: {e.reason}")
+    elif T == f64:
+        try:
+            out = check f64(cell)
+        except ParseError as e:
+            raise refused(f"`{cell}`: {e.reason}")
+    elif T == f32:
+        try:
+            out = check f32(cell)
+        except ParseError as e:
+            raise refused(f"`{cell}`: {e.reason}")
+    elif is_enum(T):
+        mut names: vector[str] = []
+        comptime for v in variants(T):
+            comptime for _f in fields(v):
+                comptime assert(False, "csv reads an enum whose cases carry no data")
+            if cell == case_text(v.name):
+                out = empty[T](v)
+                return
+            names.push(case_text(v.name))
+        raise refused(f"`{cell}` is not one of {", ".join(&names)}")
+    elif is_optional(T):
+        if len(cell) == 0:
+            out = None
+        else:
+            mut one: item(T) = empty[item(T)]()
+            check fill(&mut one, cell)
+            out = one
+    else:
+        comptime assert(False, "csv reads texts, numbers, `bool`, enums and `Optional` into the fields of a struct")
+
+# Whether `slot` is an `Optional`, for a field whose type has no name here.
+priv manual fn holds_optional[T](_slot: &T) -> bool:
+    comptime if is_optional(T):
+        return True
+    else:
+        return False
+
+# The rows after the header, each read as an `R`.
+priv manual fn structs[R](rows: &vector[vector[str]]) -> vector[R] raises CsvError:
+    mut out: vector[R] = []
+    if len(rows) == 0:
+        return out
+    const header: vector[str] = rows[0].copy()
+    for r in range(1, len(rows)):
+        if len(rows[r]) != len(header):
+            raise CsvError(line=r + 1, column="", reason=f"{len(rows[r])} fields where the header has {len(header)}")
+        mut made: R = empty[R]()
+        comptime for f in fields(R):
+            const at: Optional[size] = header.find(&f.name)
+            if at is not None:
+                try:
+                    check fill(&mut field(made, f), &rows[r][at])
+                except CsvError as e:
+                    raise CsvError(line=r + 1, column=f.name, reason=e.reason.copy())
+            elif not f.has_default and not holds_optional(&field(made, f)):
+                raise CsvError(line=1, column=f.name, reason="no column of this name")
+        out.push(made)
+    return out
+
+# The cell that `value` is written as.
+priv manual fn cell_of[T](value: &T) -> str:
+    comptime if T == str:
+        return value.copy()
+    elif T == bool:
+        if value:
+            return "true"
+        return "false"
+    elif is_enum(T):
+        comptime for v in variants(T):
+            if value == empty[T](v):
+                return case_text(v.name)
+        return ""
+    elif is_optional(T):
+        const held: T = value.copy()
+        if held is None:
+            return ""
+        return cell_of(&held)
+    elif is_int(T) or is_float(T):
+        return f"{value}"
+    else:
+        comptime assert(False, "csv writes texts, numbers, `bool`, enums and `Optional` from the fields of a struct")
 
 priv manual fn needs_quotes(field: &str, split: u8) -> bool:
     for i in range(byte_len(field)):
@@ -129,23 +265,40 @@ priv manual fn row_text(row: &vector[str], sep: &str) -> str:
             out += row[c]
     return out
 
-# Writes `rows`, one line each. Dicts are written as the keys of the first as a header, then
-# each one's values in that order.
-manual fn dump[T](rows: &vector[T], to: &File = stdout, sep: &str = ",") raises CsvError:
+# `rows` as CSV text, one line each, every line ending with "\n". Dicts are written as the
+# keys of the first as a header, then each one's values in that order; structs as the names
+# of their fields, then a row for each.
+manual fn to_text[T](rows: &vector[T], sep: &str = ",") -> str raises CsvError:
     check check_sep(sep)
+    mut out: str = ""
     comptime if T == dict:
         if len(rows) == 0:
-            return
+            return out
         const names: vector[str] = rows[0].keys()
-        print(row_text(&names, sep), to=to)
+        out += row_text(&names, sep) + "\n"
         for r in range(len(rows)):
             mut fields: vector[str] = []
             for name in &names:
                 const field: Optional[str] = rows[r].get(&name)
                 if field is None:
-                    raise CsvError(line=r + 2, reason=f"no `{name}` in this row")
+                    raise CsvError(line=r + 2, column="", reason=f"no `{name}` in this row")
                 fields.push(field)
-            print(row_text(&fields, sep), to=to)
-    else:
+            out += row_text(&fields, sep) + "\n"
+    elif T == vector:
         for row in rows:
-            print(row_text(row, sep), to=to)
+            out += row_text(row, sep) + "\n"
+    else:
+        mut names: vector[str] = []
+        comptime for f in fields(T):
+            names.push(f.name)
+        out += row_text(&names, sep) + "\n"
+        for r in range(len(rows)):
+            mut cells: vector[str] = []
+            comptime for f in fields(T):
+                cells.push(cell_of(&field(rows[r], f)))
+            out += row_text(&cells, sep) + "\n"
+    return out
+
+# Writes `rows`, as `to_text` gives them.
+manual fn dump[T](rows: &vector[T], to: &File = stdout, sep: &str = ",") raises CsvError:
+    print(check to_text(rows, sep), end="", to=to)

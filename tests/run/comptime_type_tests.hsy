@@ -1,0 +1,26 @@
+from io import print
+
+manual struct Point:
+    x: i32
+
+manual enum Color:
+    Red
+
+# What kind of type `T` is, as the type tests of the prelude say.
+manual fn kind[T]() -> str:
+    comptime if is_int(T):
+        return "int"
+    elif is_float(T):
+        return "float"
+    elif is_optional(T):
+        return "optional"
+    elif is_struct(T):
+        return "struct"
+    elif is_enum(T):
+        return "enum"
+    else:
+        return "other"
+
+manual fn main():
+    print(f"{kind[u8]()} {kind[size]()} {kind[f32]()} {kind[Optional[str]]()} {kind[Point]()} {kind[Color]()} {kind[str]()}")
+# expect: int int float optional struct enum other

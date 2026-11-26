@@ -1,0 +1,11 @@
+from io import print
+import re
+managed fn main():
+    for m in re.matches("(?P<key>\\w+)=(\\d+)", "a=1, bé=22,c=x, d=4"):
+        print(f"{m.group(1)} {m.named("key")} {m.group(2)} {m.start()} {m.end()}")
+    empty = re.matches("x*", "ab")
+    texts = re.find_all("x*", "ab")
+    print(f"{len(empty)} {len(texts)}")
+# expect: a a 1 0 3
+# expect: d d 4 16 19
+# expect: 3 3

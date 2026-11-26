@@ -57,7 +57,7 @@ impl Parser {
     }
 
     /// `@name` or `@name(args)`, on its own line.
-    fn parse_decorator(&mut self) -> Result<Decorator> {
+    pub(super) fn parse_decorator(&mut self) -> Result<Decorator> {
         let span = self.span();
         self.expect_sym(Sym::At)?;
         let name = self.expect_ident()?;

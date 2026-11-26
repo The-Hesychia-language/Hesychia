@@ -121,6 +121,11 @@ try:
 except ParseError as e:
     print(e.reason)               # too large for `u8`
 ```
+`base=` reads another base; its prefix is allowed:
+```python
+addr = u64("0x401000", base=16)
+mask = u8("0b1010", base=2)
+```
 
 ---
 
@@ -1080,9 +1085,10 @@ managed struct Options:
     # The file to read
     source: str
     retries: i64 = 3
+    @short("v")
     verbose: bool = False
 
-o = args.parse[Options]()      # tool a.txt --retries 5 --verbose
+o = args.parse[Options]()      # tool a.txt --retries 5 -v
 ```
 
 ### `json`
@@ -1099,8 +1105,15 @@ Load and write tables.
 ```python
 import csv
 
-rows = csv.load[dict](f)
+rows = csv.load[dict](f)          # from a file
+table = csv.parse[vector](text)   # from a text
 csv.dump(rows)
+print(csv.to_text(table, sep=";"))
+```
+A struct reads each row, its fields from the columns of their names:
+```python
+users = csv.load[User](f)         # vector[User]
+csv.dump(users)                   # the field names, then a row each
 ```
 
 ### `re`

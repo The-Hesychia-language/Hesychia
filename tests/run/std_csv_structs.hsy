@@ -1,0 +1,40 @@
+from io import print
+import csv
+
+managed enum Plan:
+    Free
+    TeamPro
+
+manual struct User:
+    name: str
+    age: u8
+    plan: Plan
+    score: Optional[f64]
+    active: bool = True
+
+managed fn read(text: str):
+    try:
+        users = csv.parse[User](text)
+        print(f"{len(users)} {users[0].name} {users[0].age} {users[0].plan} {users[0].score} {users[0].active}")
+    except CsvError as e:
+        print(f"line {e.line}, {e.column}: {e.reason}")
+
+managed fn main():
+    text = "age,name,plan,score,extra\n31,Ana,team-pro,9.5,x\n7,Bob,free,,y\n"
+    read(text)
+    users = csv.parse[User](text)
+    print(f"{users[1].score} {users[1].plan}")
+    print(csv.to_text(users), end="")
+    read("name,age,plan\nAna,300,free\n")
+    read("name,age,plan\nAna,3,gold\n")
+    read("name,plan\nAna,free\n")
+    read("name,age,plan,active\nAna,3,free,yes\n")
+# expect: 2 Ana 31 Plan.TeamPro 9.5 True
+# expect: None Plan.Free
+# expect: name,age,plan,score,active
+# expect: Ana,31,team-pro,9.5,true
+# expect: Bob,7,free,,true
+# expect: line 2, age: `300` does not fit the field's type
+# expect: line 2, plan: `gold` is not one of free, team-pro
+# expect: line 1, age: no column of this name
+# expect: line 2, active: `yes`: expected true or false

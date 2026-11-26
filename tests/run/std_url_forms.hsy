@@ -1,0 +1,17 @@
+from io import print
+import url
+
+managed fn main():
+    mut fields = dict[str, str]()
+    fields["user"] = "ann b"
+    fields["note"] = "a&b=c/é"
+    print(url.encode_form(fields))
+    back = url.decode_form("user=ann+b&tag=x&tag=y%20z&empty=&flag")
+    print(f"{back}")
+    u = url.parse("https://example.com/?tag=a&tag=b%26c")
+    print(url.encode_form(u.query))
+    print(url.to_text(u))
+# expect: user=ann%20b&note=a%26b%3Dc%2F%C3%A9
+# expect: {'user': ['ann b'], 'tag': ['x', 'y z'], 'empty': [''], 'flag': ['']}
+# expect: tag=a&tag=b%26c
+# expect: https://example.com/?tag=a&tag=b%26c

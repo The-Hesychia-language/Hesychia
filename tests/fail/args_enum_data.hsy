@@ -1,0 +1,12 @@
+import args
+
+manual enum Shape:
+    Circle(radius: f64)
+    Square
+
+manual struct Options:
+    shape: Shape = Shape.Square
+
+manual fn main():
+    const o: Options = args.parse[Options]()
+# error: args reads an enum whose cases carry no data

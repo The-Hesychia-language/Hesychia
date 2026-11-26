@@ -470,7 +470,8 @@ impl Env for Frame<'_> {
     }
 }
 
-/// The `comptime fn`s every module has: `item(T)`, the type of what `T` holds, and `panic`.
+/// The `comptime fn`s every module has: `item(T)`, the type of what `T` holds, the tests
+/// `is_struct`, `is_enum`, `is_int`, `is_float` and `is_optional`, and `panic`.
 pub(super) fn builtin_call(tables: &Tables, callee: &str, args: Vec<Value>, span: Span) -> Result<Value> {
     // A `dict[K, V]` or a `set[T]` holds what its last type argument names.
     let held = |ty: &Type| match ty {
@@ -487,6 +488,9 @@ pub(super) fn builtin_call(tables: &Tables, callee: &str, args: Vec<Value>, span
         ("item", _) => Err(Diagnostic::error(span, "`item` takes one type")),
         ("is_struct", [Value::Type(ty)]) => Ok(Value::Bool(matches!(ty, Type::Struct(_)))),
         ("is_enum", [Value::Type(ty)]) => Ok(Value::Bool(matches!(ty, Type::Enum { .. }))),
+        ("is_int", [Value::Type(ty)]) => Ok(Value::Bool(matches!(ty, Type::Int(_)))),
+        ("is_float", [Value::Type(ty)]) => Ok(Value::Bool(matches!(ty, Type::Float(_)))),
+        ("is_optional", [Value::Type(ty)]) => Ok(Value::Bool(matches!(ty, Type::Optional(_)))),
         // A `comptime fn` that panics stops the compilation with its message.
         ("panic", [Value::Str(message)]) => Err(Diagnostic::error(span, message.clone())),
         _ => Err(Diagnostic::error(span, format!("`{callee}` cannot be called at compile time"))),

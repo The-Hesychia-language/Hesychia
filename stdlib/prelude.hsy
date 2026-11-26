@@ -295,32 +295,59 @@ extend str:
 
 # --- numbers from text ---------------------------------------------------------
 
-# The sign and digits of an integer, spaces around it allowed. `name` is the type read, for
-# the reason of the error.
-priv manual fn digits_of(text: &str, high: u128, name: &str) -> (bool, u128) raises ParseError:
+# The value of the digit `b` in `base`, if it is one: `0`-`9`, then `a`-`z` or `A`-`Z`.
+priv manual fn digit_in(b: u8, base: u32) -> Optional[u32]:
+    mut value: u32 = 99
+    if b >= 48 and b <= 57:
+        value = u32(b - 48)
+    elif b >= 97 and b <= 122:
+        value = u32(b - 87)
+    elif b >= 65 and b <= 90:
+        value = u32(b - 55)
+    if value < base:
+        return value
+    return None
+
+# The prefix that `base` may be written with: `0x` for 16, `0o` for 8, `0b` for 2.
+priv manual fn has_prefix(text: &str, i: size, base: u32) -> bool:
+    if i + 2 > byte_len(text) or text.byte(i) != 48:
+        return False
+    const mark: u8 = text.byte(i + 1) | 32
+    return (base == 16 and mark == 120) or (base == 8 and mark == 111) or (base == 2 and mark == 98)
+
+# The sign and digits of an integer in `base`, spaces around it allowed. `name` is the type
+# read, for the reason of the error.
+priv manual fn digits_of(text: &str, high: u128, name: &str, base: u32) -> (bool, u128) raises ParseError:
+    if base < 2 or base > 36:
+        raise ParseError(text=f"{text}", reason=f"the base {base} is not from 2 to 36")
     const trimmed: str = text.strip()
     mut i: size = 0
     const negative: bool = byte_len(trimmed) > 0 and trimmed.byte(0) == 45
     if byte_len(trimmed) > 0 and (trimmed.byte(0) == 45 or trimmed.byte(0) == 43):
         i = 1
+    if has_prefix(&trimmed, i, base):
+        i += 2
     if i == byte_len(trimmed):
         raise ParseError(text=f"{text}", reason="no digits")
     mut value: u128 = 0
+    const wide: u128 = u128(base)
     while i < byte_len(trimmed):
-        const b: u8 = trimmed.byte(i)
-        if not is_digit(b):
-            raise ParseError(text=f"{text}", reason="not a whole number")
-        const digit: u128 = u128(b - 48)
-        if value > (high - digit) // 10:
+        const digit: Optional[u32] = digit_in(trimmed.byte(i), base)
+        if digit is None:
+            if base == 10:
+                raise ParseError(text=f"{text}", reason="not a whole number")
+            raise ParseError(text=f"{text}", reason=f"not a whole number in base {base}")
+        const d: u128 = u128(digit)
+        if value > (high - d) // wide:
             raise ParseError(text=f"{text}", reason=f"too large for `{name}`")
-        value = value * 10 + digit
+        value = value * wide + d
         i += 1
     return (negative, value)
 
 # A signed integer of `bits` bits.
-priv manual fn parse_signed(text: &str, bits: u32, name: &str) -> i128 raises ParseError:
+priv manual fn parse_signed(text: &str, bits: u32, name: &str, base: u32) -> i128 raises ParseError:
     const most: u128 = u128(1) << u128(bits - 1)
-    const (negative, value): (bool, u128) = check digits_of(text, most, name)
+    const (negative, value): (bool, u128) = check digits_of(text, most, name, base)
     if not negative:
         if value == most:
             raise ParseError(text=f"{text}", reason=f"too large for `{name}`")
@@ -329,50 +356,50 @@ priv manual fn parse_signed(text: &str, bits: u32, name: &str) -> i128 raises Pa
         return -i128(most - 1) - 1
     return -i128(value)
 
-priv manual fn parse_unsigned(text: &str, bits: u32, name: &str) -> u128 raises ParseError:
+priv manual fn parse_unsigned(text: &str, bits: u32, name: &str, base: u32) -> u128 raises ParseError:
     mut high: u128 = ~u128(0)
     if bits < 128:
         high = (u128(1) << u128(bits)) - 1
-    const (negative, value): (bool, u128) = check digits_of(text, high, name)
+    const (negative, value): (bool, u128) = check digits_of(text, high, name, base)
     if negative and value != 0:
         raise ParseError(text=f"{text}", reason=f"`{name}` cannot be negative")
     return value
 
-priv manual fn parse_i8(text: &str) -> i8 raises ParseError:
-    return i8(check parse_signed(text, 8, "i8"))
+priv manual fn parse_i8(text: &str, base: u32 = 10) -> i8 raises ParseError:
+    return i8(check parse_signed(text, 8, "i8", base))
 
-priv manual fn parse_i16(text: &str) -> i16 raises ParseError:
-    return i16(check parse_signed(text, 16, "i16"))
+priv manual fn parse_i16(text: &str, base: u32 = 10) -> i16 raises ParseError:
+    return i16(check parse_signed(text, 16, "i16", base))
 
-priv manual fn parse_i32(text: &str) -> i32 raises ParseError:
-    return i32(check parse_signed(text, 32, "i32"))
+priv manual fn parse_i32(text: &str, base: u32 = 10) -> i32 raises ParseError:
+    return i32(check parse_signed(text, 32, "i32", base))
 
-priv manual fn parse_i64(text: &str) -> i64 raises ParseError:
-    return i64(check parse_signed(text, 64, "i64"))
+priv manual fn parse_i64(text: &str, base: u32 = 10) -> i64 raises ParseError:
+    return i64(check parse_signed(text, 64, "i64", base))
 
-priv manual fn parse_i128(text: &str) -> i128 raises ParseError:
-    return check parse_signed(text, 128, "i128")
+priv manual fn parse_i128(text: &str, base: u32 = 10) -> i128 raises ParseError:
+    return check parse_signed(text, 128, "i128", base)
 
-priv manual fn parse_offset(text: &str) -> offset raises ParseError:
-    return offset(check parse_signed(text, 64, "offset"))
+priv manual fn parse_offset(text: &str, base: u32 = 10) -> offset raises ParseError:
+    return offset(check parse_signed(text, 64, "offset", base))
 
-priv manual fn parse_u8(text: &str) -> u8 raises ParseError:
-    return u8(check parse_unsigned(text, 8, "u8"))
+priv manual fn parse_u8(text: &str, base: u32 = 10) -> u8 raises ParseError:
+    return u8(check parse_unsigned(text, 8, "u8", base))
 
-priv manual fn parse_u16(text: &str) -> u16 raises ParseError:
-    return u16(check parse_unsigned(text, 16, "u16"))
+priv manual fn parse_u16(text: &str, base: u32 = 10) -> u16 raises ParseError:
+    return u16(check parse_unsigned(text, 16, "u16", base))
 
-priv manual fn parse_u32(text: &str) -> u32 raises ParseError:
-    return u32(check parse_unsigned(text, 32, "u32"))
+priv manual fn parse_u32(text: &str, base: u32 = 10) -> u32 raises ParseError:
+    return u32(check parse_unsigned(text, 32, "u32", base))
 
-priv manual fn parse_u64(text: &str) -> u64 raises ParseError:
-    return u64(check parse_unsigned(text, 64, "u64"))
+priv manual fn parse_u64(text: &str, base: u32 = 10) -> u64 raises ParseError:
+    return u64(check parse_unsigned(text, 64, "u64", base))
 
-priv manual fn parse_u128(text: &str) -> u128 raises ParseError:
-    return check parse_unsigned(text, 128, "u128")
+priv manual fn parse_u128(text: &str, base: u32 = 10) -> u128 raises ParseError:
+    return check parse_unsigned(text, 128, "u128", base)
 
-priv manual fn parse_size(text: &str) -> size raises ParseError:
-    return size(check parse_unsigned(text, 64, "size"))
+priv manual fn parse_size(text: &str, base: u32 = 10) -> size raises ParseError:
+    return size(check parse_unsigned(text, 64, "size", base))
 
 # `[+-]digits[.digits][(e|E)[+-]digits]`, spaces around it allowed.
 priv manual fn parse_f64(text: &str) -> f64 raises ParseError:

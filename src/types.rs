@@ -378,6 +378,8 @@ pub struct FieldDef {
     pub default: Option<crate::comptime::Value>,
     /// The comment above the field.
     pub doc: String,
+    /// The decorators above the field, by name, with the text each was given.
+    pub decorators: Vec<(String, String)>,
 }
 
 pub struct StructDef {

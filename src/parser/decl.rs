@@ -24,10 +24,16 @@ impl Parser {
             if self.at(&Tok::Kw(Kw::Method)) || self.at_private_method() {
                 methods.push(self.parse_method(level)?);
             } else {
-                fields.push(self.parse_field()?);
+                let doc = self.doc();
+                let decorators = self.parse_field_decorators()?;
+                let mut field = self.parse_field()?;
+                field.doc = doc;
+                field.decorators = decorators;
                 self.expect_newline()?;
+                fields.push(field);
             }
         }
+        check_shorts(&fields)?;
         Ok(StructDecl {
             level,
             private,
@@ -136,6 +142,27 @@ impl Parser {
             && matches!(self.tokens.get(self.pos + 1).map(|t| &t.tok), Some(Tok::Kw(Kw::Method)))
     }
 
+    /// `@name("text")` lines above a field. Only the decorators that a library reads are
+    /// taken, so that a misspelt one is not passed over.
+    fn parse_field_decorators(&mut self) -> Result<Vec<(String, String)>> {
+        let mut decorators = Vec::new();
+        while self.at(&Tok::Sym(Sym::At)) {
+            let decorator = self.parse_decorator()?;
+            if !FIELD_DECORATORS.contains(&decorator.name.as_str()) {
+                return Err(Diagnostic::error(decorator.span, format!("a field takes no `@{}`", decorator.name))
+                    .with_hint("a field takes `@short(\"v\")`, the one-letter option of `args`"));
+            }
+            let [crate::ast::Expr { kind: crate::ast::ExprKind::Str(text), .. }] = &decorator.args[..] else {
+                return Err(Diagnostic::error(decorator.span, format!("write `@{}(\"...\")`", decorator.name)));
+            };
+            if self.at(&Tok::Kw(Kw::Method)) || self.at_private_method() {
+                return Err(Diagnostic::error(decorator.span, format!("`@{}` goes above a field", decorator.name)));
+            }
+            decorators.push((decorator.name, text.clone()));
+        }
+        Ok(decorators)
+    }
+
     fn parse_field(&mut self) -> Result<FieldDecl> {
         let span = self.span();
         let doc = self.doc();
@@ -144,7 +171,7 @@ impl Parser {
         self.expect_sym(Sym::Colon)?;
         let ty = self.parse_type()?;
         let default = if self.eat_sym(Sym::Assign) { Some(self.parse_expr()?) } else { None };
-        Ok(FieldDecl { private, name, ty, default, doc, span })
+        Ok(FieldDecl { private, name, ty, default, doc, decorators: Vec::new(), span })
     }
 
     /// `method name(self-or-params) [-> T]: body`; the method takes the struct's level.
@@ -234,4 +261,33 @@ impl Parser {
         }
         Ok(params)
     }
+}
+
+/// The decorators a field may take.
+const FIELD_DECORATORS: &[&str] = &["short"];
+
+/// `@short("v")`: one ASCII letter or digit, not `h`, which is `-h` for the help, and given to
+/// one field only.
+fn check_shorts(fields: &[FieldDecl]) -> Result<()> {
+    let mut taken: Vec<&str> = Vec::new();
+    for field in fields {
+        for (name, text) in &field.decorators {
+            if name != "short" {
+                continue;
+            }
+            let one = text.len() == 1 && text.bytes().all(|b| b.is_ascii_alphanumeric());
+            if !one || text == "h" {
+                return Err(Diagnostic::error(
+                    field.span,
+                    format!("`@short(\"{text}\")` is not one letter or digit other than `h`"),
+                )
+                .with_hint("`-h` shows the help"));
+            }
+            if taken.contains(&text.as_str()) {
+                return Err(Diagnostic::error(field.span, format!("`-{text}` is given to two fields")));
+            }
+            taken.push(text);
+        }
+    }
+    Ok(())
 }
