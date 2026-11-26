@@ -24,14 +24,11 @@ jobs:
           cargo build --release
           ./target/release/hsy build tests/run/std_net_tls.hsy -o tls.exe --emit-c || true
           set +e
-          for v in "-static" "" "-static -Wl,--no-gc-sections" "-static -fuse-ld=lld"; do
-            echo "=== variant [$v]"
-            cc -std=c11 -o v.exe tls.c -O0 -g $v -pthread -lssl -lcrypto -lcrypt32 -lws2_32 -lm
+          for libs in "-lssl -lcrypto -lcrypt32 -lbcrypt -lws2_32" "-lssl -lcrypto -lcrypt32 -lbcrypt -luser32 -ladvapi32 -lws2_32"; do
+            echo "=== libs [$libs]"
+            cc -std=c11 -o v.exe tls.c -Os -ffunction-sections -fdata-sections -static -Wl,--gc-sections -s -pthread $libs -lm
             echo "status $?"
             ./v.exe; echo "run $?"
+            ls -la v.exe
             rm -f v.exe
           done
-          echo "=== -O0 -static release-like"
-          cc -std=c11 -o r.exe tls.c -Os -ffunction-sections -fdata-sections -static -Wl,--gc-sections -s -pthread -lssl -lcrypto -lcrypt32 -lws2_32 -lm; echo "status $?"; ./r.exe; echo "run $?"
-          echo "=== no tls"
-          ./target/release/hsy build tests/run/std_net.hsy -o n.exe; echo "status $?"
