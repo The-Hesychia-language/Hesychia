@@ -14,13 +14,6 @@ manual enum Value:
     List(items: vector[Value])
     Object(fields: dict[str, Value])
 
-# Bytes cut from valid text at ASCII marks, or built from code points, are valid text.
-priv manual fn text_of(bytes: &vector[u8]) -> str:
-    const text: Optional[str] = str.from_bytes(bytes)
-    if text is None:
-        panic("json: not UTF-8 text")
-    return text
-
 # Text that is not well-formed JSON, or a value that does not fit a struct. `line` and
 # `column` say where the text goes wrong, counted from 1 in characters; both are 0 when it
 # is the value that does not fit, and `reason` then starts with where: "users[2].age: ...".
@@ -81,7 +74,7 @@ priv manual fn read_text(s: &mut Scanner) -> str raises JsonError:
                 raise error(s, start + i, "a control character inside a string")
         out.extend(bytes)
         if s.eat("\""):
-            return text_of(&out)
+            return str.from_any_bytes(&out)
         if s.at_end():
             raise error(s, s.mark(), "a string is not closed")
         s.next()
@@ -224,7 +217,7 @@ priv manual fn dump_text(out: &mut str, text: &str):
             bytes.push(digits.byte(size(b & 15)))
         else:
             bytes.push(b)
-    out += text_of(&bytes)
+    out += str.from_any_bytes(&bytes)
     out += "\""
 
 # A line break and `depth` levels of `indent` spaces, when `indent` asks for lines.

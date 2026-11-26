@@ -140,6 +140,7 @@ byte_len(s)     # 5
 s = s + "!"
 data = s.bytes()           # vector[u8], the UTF-8 bytes
 back = str.from_bytes(data)  # Optional[str]
+text = str.from_any_bytes(data)  # str: bad bytes become �
 ```
 
 ### f-strings

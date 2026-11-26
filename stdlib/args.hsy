@@ -40,12 +40,6 @@ priv manual struct Help:
     names: vector[str]
     texts: vector[str]
 
-priv manual fn text_of(bytes: &vector[u8]) -> str:
-    const text: Optional[str] = str.from_bytes(bytes)
-    if text is None:
-        return ""
-    return text
-
 # The option of a field: `dry_run` is `--dry-run`.
 priv manual fn option_of(field: &str) -> str:
     return "--" + field.replace("_", "-")
@@ -324,7 +318,7 @@ priv manual fn program_name(path: &str) -> str:
     mut out: vector[u8] = []
     for i in range(start, byte_len(path)):
         out.push(path.byte(i))
-    return text_of(&out)
+    return str.from_any_bytes(&out)
 
 # The command line of the program, read as a `T`. `--help` writes the help and ends the
 # program; a command line that does not fit writes why, and ends it with the code 2.

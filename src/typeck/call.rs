@@ -451,6 +451,9 @@ impl Checker<'_> {
             return self.check_explicit_copy(expr);
         }
         if matches!(&receiver.kind, ExprKind::Name(n) if n == "str" && self.find_local(n).is_none()) {
+            if name == "from_any_bytes" {
+                return self.check_from_any_bytes(expr);
+            }
             let (kind, ty) = self.check_str_static(name, args, span)?;
             expr.kind = kind;
             return Ok(ty);

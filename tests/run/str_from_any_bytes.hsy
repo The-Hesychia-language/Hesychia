@@ -1,0 +1,10 @@
+from io import print
+
+manual fn main():
+    const good: vector[u8] = [104, 195, 169]
+    const bad: vector[u8] = [104, 255, 105, 226, 130]
+    print(f"{str.from_any_bytes(&good)} {str.from_any_bytes(&bad)} {str.from_bytes(&bad)}")
+    const empty: vector[u8] = []
+    print(f"[{str.from_any_bytes(&empty)}]")
+# expect: hé h�i�� None
+# expect: []
