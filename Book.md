@@ -1099,8 +1099,10 @@ Load and write tables.
 ```python
 import csv
 
-rows = csv.load[dict](f)
+rows = csv.load[dict](f)          # from a file
+table = csv.parse[vector](text)   # from a text
 csv.dump(rows)
+print(csv.to_text(table, sep=";"))
 ```
 
 ### `re`

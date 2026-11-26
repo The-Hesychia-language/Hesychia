@@ -26,22 +26,27 @@ priv comptime fn row(R: type) -> type:
         return dict[str, str]
     if R == vector:
         return vector[str]
-    panic("csv: load each row as a `vector` or a `dict`")
+    panic("csv: read each row as a `vector` or a `dict`")
 
-# The rows of the file. `load[vector](f)` gives each as a vector of fields; `load[dict](f)` gives
-# each row after the first as a dict from the first row's names to its fields. `sep` is one
-# character such as "," or ";".
+# The rows of the file, as `parse` reads them.
 manual fn load[R](f: &File, sep: &str = ",") -> vector[row(R)] raises CsvError | IoError:
     const text: Optional[str] = check io.read(f, end="")
-    mut rows: vector[vector[str]] = []
-    if text is not None:
-        rows = check parse(&text, sep)
+    if text is None:
+        return []
+    return check parse[R](&text, sep)
+
+# The rows written in `text`. `parse[vector](text)` gives each as a vector of fields;
+# `parse[dict](text)` gives each row after the first as a dict from the first row's names to
+# its fields. `sep` is one character such as "," or ";".
+manual fn parse[R](text: &str, sep: &str = ",") -> vector[row(R)] raises CsvError:
+    const rows: vector[vector[str]] = check fields_of(text, sep)
     comptime if R == dict:
         return check records(&rows)
     else:
         return rows
 
-priv manual fn parse(text: &str, sep: &str) -> vector[vector[str]] raises CsvError:
+# Each line of `text` cut into its fields.
+priv manual fn fields_of(text: &str, sep: &str) -> vector[vector[str]] raises CsvError:
     check check_sep(sep)
     const split: u8 = sep.byte(0)
     const n: size = byte_len(text)
@@ -129,15 +134,16 @@ priv manual fn row_text(row: &vector[str], sep: &str) -> str:
             out += row[c]
     return out
 
-# Writes `rows`, one line each. Dicts are written as the keys of the first as a header, then
-# each one's values in that order.
-manual fn dump[T](rows: &vector[T], to: &File = stdout, sep: &str = ",") raises CsvError:
+# `rows` as CSV text, one line each, every line ending with "\n". Dicts are written as the
+# keys of the first as a header, then each one's values in that order.
+manual fn to_text[T](rows: &vector[T], sep: &str = ",") -> str raises CsvError:
     check check_sep(sep)
+    mut out: str = ""
     comptime if T == dict:
         if len(rows) == 0:
-            return
+            return out
         const names: vector[str] = rows[0].keys()
-        print(row_text(&names, sep), to=to)
+        out += row_text(&names, sep) + "\n"
         for r in range(len(rows)):
             mut fields: vector[str] = []
             for name in &names:
@@ -145,7 +151,12 @@ manual fn dump[T](rows: &vector[T], to: &File = stdout, sep: &str = ",") raises 
                 if field is None:
                     raise CsvError(line=r + 2, reason=f"no `{name}` in this row")
                 fields.push(field)
-            print(row_text(&fields, sep), to=to)
+            out += row_text(&fields, sep) + "\n"
     else:
         for row in rows:
-            print(row_text(row, sep), to=to)
+            out += row_text(row, sep) + "\n"
+    return out
+
+# Writes `rows`, as `to_text` gives them.
+manual fn dump[T](rows: &vector[T], to: &File = stdout, sep: &str = ",") raises CsvError:
+    print(check to_text(rows, sep), end="", to=to)

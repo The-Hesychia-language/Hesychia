@@ -27,6 +27,13 @@ managed fn main():
         print(f"line {e.line}: {e.reason}")
     io.close(h)
     fs.remove("hsy-csv-test.csv")
+    table = csv.parse[vector]("x;y\n1;\"a;b\"\n", sep=";")
+    print(f"{table}")
+    named = csv.parse[dict]("id,name\r\n7,Zoé\r\n")
+    nothing = csv.parse[vector]("")
+    print(f"{named[0]["name"]} {len(nothing)}")
+    print(csv.to_text(table), end="")
+    print(csv.to_text(named, sep="|"), end="")
 # expect: 3 ['ana', 'Paris', 'says "hi"'] Lyon, FR
 # expect: Paris two|lines
 # expect: name,city,note
@@ -38,3 +45,9 @@ managed fn main():
 # expect: bob;Lyon, FR;"two
 # expect: lines"
 # expect: line 1: a quoted field is not closed
+# expect: [['x', 'y'], ['1', 'a;b']]
+# expect: Zoé 0
+# expect: x,y
+# expect: 1,a;b
+# expect: id|name
+# expect: 7|Zoé
