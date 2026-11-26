@@ -1,0 +1,98 @@
+from io import print
+import io
+import net
+import http
+from thread import spawn
+from io import File, IoError
+from net import Listener
+from http import Response
+
+manual fn reply(conn: &File, head: &str, body: &str) raises IoError:
+    const text: str = f"HTTP/1.1 {head}\r\nContent-Length: {byte_len(body)}\r\n\r\n{body}"
+    const bytes: vector[u8] = text.bytes()
+    check io.sys_write(conn, &bytes)
+
+# Serves `count` connections, each for as many requests as the client sends on it; every
+# answer tells which connection it came on and the cookies the request carried.
+manual fn serve(owned listener: Listener, count: i64):
+    try:
+        for n in range(count):
+            const conn: File = check net.accept(&listener)
+            mut open: bool = True
+            while open:
+                mut target: str = ""
+                mut cookies: str = "-"
+                mut length: size = 0
+                mut first: bool = True
+                mut done: bool = False
+                while not done:
+                    const line: Optional[str] = check io.read(&conn)
+                    if line is None:
+                        done = True
+                        open = False
+                    elif byte_len(line) == 0:
+                        done = True
+                    else:
+                        if first:
+                            const parts: vector[str] = line.split(" ")
+                            target = parts[1].copy()
+                            first = False
+                        elif line.starts_with("Cookie: "):
+                            cookies = line[8:len(line)]
+                        elif line.starts_with("Content-Length: "):
+                            const digits: str = line[16:len(line)]
+                            length = size(check i64(digits))
+                if open:
+                    if length > 0:
+                        check io.sys_read(&conn, length)
+                    const body: str = f"conn {n + 1} {target} cookies: {cookies}"
+                    if target == "/login":
+                        check reply(&conn, "302 Found\r\nLocation: /home\r\nSet-Cookie: sid=abc; Path=/; HttpOnly\r\nSet-Cookie: theme=dark; Path=/settings\r\nSet-Cookie: tracker=1; Domain=other.example\r\nSet-Cookie: wide=1; Domain=.0.0.1\r\nSet-Cookie: secret=1; Secure\r\nSet-Cookie: old=1; Expires=Thu, 01 Jan 1970 00:00:00 GMT\r\nSet-Cookie: soon=1; asc=1; Max-Age=3600; expires=Wed, 21 Oct 2099 07:28:00 GMT\r\nSet-Cookie: rfc850=1; Expires=Sunday, 06-Nov-94 08:49:37 GMT\r\nSet-Cookie: asc=1; Expires=Sun Nov  6 08:49:37 2094", "")
+                    elif target == "/logout":
+                        check reply(&conn, "200 OK\r\nSet-Cookie: sid=; Max-Age=0", &body)
+                    elif target == "/bye":
+                        check reply(&conn, "200 OK\r\nConnection: close", &body)
+                        open = False
+                    elif target == "/idle":
+                        # Answers, then closes without saying so, as an idle server does.
+                        check reply(&conn, "200 OK", &body)
+                        open = False
+                    else:
+                        check reply(&conn, "200 OK", &body)
+    except IoError as e:
+        print(f"server: {e.reason}")
+    except ParseError as _e:
+        print("server: bad length")
+
+managed fn show(r: Response):
+    text = str.from_bytes(r.body)
+    if text is not None:
+        print(text)
+
+managed fn main():
+    listener = net.listen("127.0.0.1", 47270, timeout=10.0)
+    t = spawn(serve, listener, 4)
+    base = "http://127.0.0.1:47270"
+    s = http.Session()
+    show(s.post(f"{base}/login", "user=ann".bytes()))
+    show(s.get(f"{base}/settings/x"))
+    s.set_cookie("127.0.0.1", "manual", "yes")
+    for path in ["/home", "/home", "/idle", "/home", "/bye", "/home", "/logout", "/home"]:
+        show(s.get(f"{base}{path}"))
+    s.close()
+    show(http.get(f"{base}/home"))
+    t.join()
+    sid = s.cookie("127.0.0.1", "sid")
+    print(f"{sid} {s.cookie("127.0.0.1", "soon")} {s.cookie("127.0.0.1", "theme")}")
+# expect: conn 1 /home cookies: sid=abc; soon=1; asc=1
+# expect: conn 1 /settings/x cookies: sid=abc; theme=dark; soon=1; asc=1
+# expect: conn 1 /home cookies: sid=abc; soon=1; asc=1; manual=yes
+# expect: conn 1 /home cookies: sid=abc; soon=1; asc=1; manual=yes
+# expect: conn 1 /idle cookies: sid=abc; soon=1; asc=1; manual=yes
+# expect: conn 2 /home cookies: sid=abc; soon=1; asc=1; manual=yes
+# expect: conn 2 /bye cookies: sid=abc; soon=1; asc=1; manual=yes
+# expect: conn 3 /home cookies: sid=abc; soon=1; asc=1; manual=yes
+# expect: conn 3 /logout cookies: sid=abc; soon=1; asc=1; manual=yes
+# expect: conn 3 /home cookies: soon=1; asc=1; manual=yes
+# expect: conn 4 /home cookies: -
+# expect: None '1' 'dark'
