@@ -4,6 +4,7 @@
 # `timeout` is in seconds: a wait that lasts longer fails with an `IoError` whose reason is
 # "timed out". 0, the default, waits without limit.
 
+import fs
 from io import File, IoError, from_connection
 
 @symbol("hsy_net_connect")
@@ -27,7 +28,19 @@ priv extern fn c_close(socket: i64)
 @symbol("hsy_net_wrap")
 priv extern fn c_wrap(socket: i64) -> ptr[u8]
 @symbol("hsy_tls_wrap")
-priv extern fn c_tls(socket: i64, host: ptr[u8], verify: i32) -> Optional[ptr[u8]]
+priv extern fn c_tls(socket: i64, host: ptr[u8], verify: i32, authority: Optional[ptr[u8]]) -> Optional[ptr[u8]]
+@symbol("hsy_tls_server")
+priv extern fn c_tls_server(cert: ptr[u8], key: ptr[u8]) -> Optional[ptr[u8]]
+@symbol("hsy_tls_certificate")
+priv extern fn c_tls_certificate(name: ptr[u8], names: ptr[u8], signer_cert: Optional[ptr[u8]], signer_key: Optional[ptr[u8]], authority: i32, days: i32, rsa: i32) -> Optional[ptr[u8]]
+@symbol("hsy_tls_check")
+priv extern fn c_tls_check(cert: ptr[u8], key: ptr[u8]) -> i32
+@symbol("hsy_net_accepted")
+priv extern fn c_accepted(socket: i64, context: Optional[ptr[u8]]) -> Optional[ptr[u8]]
+@symbol("hsy_net_free_context")
+priv extern fn c_free_context(context: Optional[ptr[u8]])
+@symbol("free")
+priv extern fn c_free(p: ptr[u8])
 @symbol("hsy_net_error")
 priv extern fn c_error() -> ptr[u8]
 
@@ -36,8 +49,11 @@ manual struct Listener(Drop):
     priv socket: i64
     priv address: str
     priv timeout: f64
+    # The TLS context of a `listen_tls` listener; `None` for plain TCP.
+    priv tls: Optional[ptr[u8]]
 
     method drop(&mut self):
+        c_free_context(self.tls)
         c_close(self.socket)
 
 # A UDP socket, which `send` and `receive` messages through; closed at the end of its scope.
@@ -62,9 +78,11 @@ manual fn connect(host: &str, port: i32, timeout: f64 = 0.0) -> File raises IoEr
 # A connection as `connect` makes one, through which what goes is encrypted with TLS (1.2 at
 # least), as HTTPS does. The server must show a certificate for `host` that the system trusts.
 # `verify=False` takes any certificate: the connection is still encrypted, but anyone on the
-# way can pose as the server; it is for test servers and self-signed ones. A program that uses
+# way can pose as the server; it is for test servers and self-signed ones. `authority`, a
+# certificate authority (see `certificate`), is trusted instead of the system's: only the
+# certificates it signed are taken, as for a lab or an internal service. A program that uses
 # TLS is linked with OpenSSL (`libssl`), which must be installed where it is built.
-manual fn connect_tls(host: &str, port: i32, timeout: f64 = 0.0, verify: bool = True) -> File raises IoError:
+manual fn connect_tls(host: &str, port: i32, timeout: f64 = 0.0, verify: bool = True, owned authority: Optional[Certificate] = None) -> File raises IoError:
     const address: str = f"{host}:{port}"
     const socket: i64 = c_connect(host.to_c(), port, timeout)
     if socket < 0:
@@ -72,7 +90,12 @@ manual fn connect_tls(host: &str, port: i32, timeout: f64 = 0.0, verify: bool = 
     mut checked: i32 = 0
     if verify:
         checked = 1
-    const conn: Optional[ptr[u8]] = c_tls(socket, host.to_c(), checked)
+    mut conn: Optional[ptr[u8]] = None
+    if authority is not None:
+        const trusted: str = pem_text(&authority.cert)
+        conn = c_tls(socket, host.to_c(), checked, trusted.to_c())
+    else:
+        conn = c_tls(socket, host.to_c(), checked, None)
     if conn is None:
         raise failure(&address)
     return from_connection(conn, &address)
@@ -84,7 +107,24 @@ manual fn listen(host: &str, port: i32, timeout: f64 = 0.0) -> Listener raises I
     const socket: i64 = c_listen(host.to_c(), port)
     if socket < 0:
         raise failure(&address)
-    return Listener(socket=socket, address=address, timeout=timeout)
+    return Listener(socket=socket, address=address, timeout=timeout, tls=None)
+
+# Waits for TLS connections on `port`, as `listen` does, showing `certificate` to each client.
+# `accept` gives them as it gives any: what goes through them is encrypted. A client that
+# fails the handshake (one that does not trust the certificate, or does not speak TLS) makes
+# that `accept` raise; the listener stays open for the next.
+manual fn listen_tls(host: &str, port: i32, certificate: &Certificate, timeout: f64 = 0.0) -> Listener raises IoError:
+    const address: str = f"{host}:{port}"
+    const cert: str = pem_text(&certificate.cert)
+    const key: str = pem_text(&certificate.key)
+    const context: Optional[ptr[u8]] = c_tls_server(cert.to_c(), key.to_c())
+    if context is None:
+        raise failure(&address)
+    const socket: i64 = c_listen(host.to_c(), port)
+    if socket < 0:
+        c_free_context(context)
+        raise failure(&address)
+    return Listener(socket=socket, address=address, timeout=timeout, tls=context)
 
 # Waits for the next client, and gives its connection.
 manual fn accept(listener: &Listener) -> File raises IoError:
@@ -92,7 +132,73 @@ manual fn accept(listener: &Listener) -> File raises IoError:
     if socket < 0:
         raise failure(&listener.address)
     const peer: str = str.from_c(c_peer(socket))
-    return from_connection(c_wrap(socket), &peer)
+    const conn: Optional[ptr[u8]] = c_accepted(socket, listener.tls)
+    if conn is None:
+        raise failure(&peer)
+    return from_connection(conn, &peer)
+
+# --- certificates ------------------------------------------------------------------------
+
+# The kind of key a certificate is made with. `Ecdsa` (P-256): small, fast, what modern TLS
+# uses. `Rsa` (3072 bits): for old clients that know nothing else.
+manual enum Key:
+    Ecdsa
+    Rsa
+
+# A certificate and its private key, both PEM, as `fs.write_bytes` writes them and servers
+# read them. The key is what proves the certificate is yours: keep it to yourself.
+manual struct Certificate:
+    cert: vector[u8]
+    key: vector[u8]
+
+priv manual fn pem_text(bytes: &vector[u8]) -> str:
+    const text: Optional[str] = str.from_bytes(bytes)
+    if text is None:
+        return ""
+    return text
+
+# A new certificate for `name`, with a new key. A server certificate is valid for `name` and
+# `names`, host names or IP addresses ("localhost", "127.0.0.1"). It is signed by `signer`, a
+# certificate made with `authority=True`, which clients that trust the signer then trust; or
+# by itself without one, which clients trust only with `verify=False` or when given that very
+# certificate. `authority=True` makes a certificate authority instead, which signs others:
+# give its `cert` to the clients (`SSL_CERT_FILE`), keep its `key`. Valid for `days`.
+manual fn certificate(name: &str, owned names: Optional[vector[str]] = None, owned signer: Optional[Certificate] = None, authority: bool = False, days: i32 = 30, key: Key = Key.Ecdsa) -> Certificate raises IoError:
+    mut listed: str = ""
+    if names is not None:
+        listed = "\n".join(&names)
+    mut flags: (i32, i32) = (0, 0)
+    if authority:
+        flags[0] = 1
+    if key == Key.Rsa:
+        flags[1] = 1
+    mut made: Optional[ptr[u8]] = None
+    if signer is not None:
+        const cert: str = pem_text(&signer.cert)
+        const signer_key: str = pem_text(&signer.key)
+        made = c_tls_certificate(name.to_c(), listed.to_c(), cert.to_c(), signer_key.to_c(), flags[0], days, flags[1])
+    else:
+        made = c_tls_certificate(name.to_c(), listed.to_c(), None, None, flags[0], days, flags[1])
+    if made is None:
+        raise failure(name)
+    const text: str = str.from_c(made)
+    c_free(made)
+    const at: Optional[size] = text.find("-----BEGIN PRIVATE KEY-----")
+    if at is None:
+        raise IoError(path=f"{name}", reason="the certificate came without its key")
+    const cert_text: str = text[0:at]
+    const key_text: str = text[at:len(text)]
+    return Certificate(cert=cert_text.bytes(), key=key_text.bytes())
+
+# The certificate and key of the PEM files at `cert` and `key`, checked to go together.
+manual fn load_certificate(cert: &str, key: &str) -> Certificate raises IoError:
+    const cert_bytes: vector[u8] = check fs.read_bytes(cert, limit=1048576)
+    const key_bytes: vector[u8] = check fs.read_bytes(key, limit=1048576)
+    const cert_text: str = pem_text(&cert_bytes)
+    const key_text: str = pem_text(&key_bytes)
+    if c_tls_check(cert_text.to_c(), key_text.to_c()) != 0:
+        raise failure(cert)
+    return Certificate(cert=cert_bytes, key=key_bytes)
 
 # A UDP socket on `port`, 0 for any free one. `timeout` limits each `receive`.
 manual fn udp(host: &str, port: i32, timeout: f64 = 0.0) -> Socket raises IoError:
