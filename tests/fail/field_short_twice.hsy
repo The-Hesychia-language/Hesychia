@@ -1,0 +1,8 @@
+manual struct O:
+    @short("a")
+    a: bool = False
+    @short("a")
+    b: bool = False
+manual fn main():
+    pass
+# error: `-a` is given to two fields

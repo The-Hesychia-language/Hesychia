@@ -1,0 +1,7 @@
+manual struct O:
+    @shrot("v")
+    a: bool = False
+
+manual fn main():
+    pass
+# error: a field takes no `@shrot`

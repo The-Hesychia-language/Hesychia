@@ -7,16 +7,18 @@
 #         # How many times to try
 #         retries: i64 = 3             an option, with its default: --retries 5
 #         # Say what is being done
-#         verbose: bool = False        a flag:                      --verbose
+#         @short("v")
+#         verbose: bool = False        a flag:                      --verbose, or -v
 #         report: Optional[str]        an option that may be left out
 #         rest: vector[str]            every word left over
 #
 #     options = args.parse[Options]()
 #
-# A field `dry_run` is the option `--dry-run`. A field of a `managed enum` takes the word of a
-# case: `mode: Mode = Mode.Fast` reads `--mode dry-run` as `Mode.DryRun`. The comments above
-# the struct and its fields are the text of `--help`. With an enum as the struct, each case
-# is a command: `tool build --release` gives `Command.Build(release=True)`.
+# A field `dry_run` is the option `--dry-run`; `@short("n")` above it adds `-n`. A field of a
+# `managed enum` takes the word of a case: `mode: Mode = Mode.Fast` reads `--mode dry-run` as
+# `Mode.DryRun`. The comments above the struct and its fields are the text of `--help`. With
+# an enum as the struct, each case is a command: `tool build --release` gives
+# `Command.Build(release=True)`.
 
 import os
 from io import print, stderr
@@ -100,8 +102,9 @@ priv manual fn is_flag[F](_slot: &F) -> bool:
 priv manual fn is_number(word: &str) -> bool:
     return byte_len(word) > 1 and word.byte(1) >= 48 and word.byte(1) <= 57
 
-# Sorts the words from `start` on. `flags` are the options that take no value.
-priv manual fn sort_out(words: &vector[str], start: size, flags: &vector[str]) -> Words raises ArgsError:
+# Sorts the words from `start` on. `flags` are the options that take no value, and `shorts`
+# gives the option that each one-letter option stands for: "-v" for "--verbose".
+priv manual fn sort_out(words: &vector[str], start: size, flags: &vector[str], shorts: &dict[str, str]) -> Words raises ArgsError:
     mut sorted: Words = Words(options=dict[str, vector[str]](), others=[], next=0)
     mut plain: bool = False
     mut i: size = start
@@ -113,10 +116,13 @@ priv manual fn sort_out(words: &vector[str], start: size, flags: &vector[str]) -
         elif word == "--":
             # Everything after `--` is a word, whatever it looks like.
             plain = True
-        elif not word.starts_with("--"):
-            raise ArgsError(reason=f"unknown option `{word}`")
         else:
             mut name: str = word.copy()
+            if not word.starts_with("--"):
+                const long: Optional[str] = shorts.get(&word)
+                if long is None:
+                    raise ArgsError(reason=f"unknown option `{word}`")
+                name = long
             mut value: Optional[str] = None
             const equal: Optional[size] = word.find("=")
             if equal is not None:
@@ -128,7 +134,7 @@ priv manual fn sort_out(words: &vector[str], start: size, flags: &vector[str]) -
                 value = "true"
             elif value is None:
                 if i >= len(words):
-                    raise ArgsError(reason=f"`{name}` needs a value")
+                    raise ArgsError(reason=f"`{word}` needs a value")
                 value = words[i].copy()
                 i += 1
             if name not in sorted.options:
@@ -207,6 +213,7 @@ priv manual fn finish(words: &Words) raises ArgsError:
 # the words after the program's name.
 manual fn to_struct[T](words: &vector[str]) -> T raises ArgsError:
     mut flags: vector[str] = []
+    mut shorts: dict[str, str] = dict()
     comptime if is_enum(T):
         if len(words) == 0:
             raise ArgsError(reason="a command is missing")
@@ -216,7 +223,7 @@ manual fn to_struct[T](words: &vector[str]) -> T raises ArgsError:
                 comptime for f in fields(v):
                     if is_flag(&field(made, f)):
                         flags.push(option_of(f.name))
-                mut sorted: Words = check sort_out(words, 1, &flags)
+                mut sorted: Words = check sort_out(words, 1, &flags, &shorts)
                 comptime for f in fields(v):
                     check take(&mut field(made, f), f.name, f.has_default, &mut sorted)
                 check finish(&sorted)
@@ -227,7 +234,9 @@ manual fn to_struct[T](words: &vector[str]) -> T raises ArgsError:
         comptime for f in fields(T):
             if is_flag(&field(made, f)):
                 flags.push(option_of(f.name))
-        mut sorted: Words = check sort_out(words, 0, &flags)
+            if byte_len(f.decorator("short")) > 0:
+                shorts[f"-{f.decorator("short")}"] = option_of(f.name)
+        mut sorted: Words = check sort_out(words, 0, &flags, &shorts)
         comptime for f in fields(T):
             check take(&mut field(made, f), f.name, f.has_default, &mut sorted)
         check finish(&sorted)
@@ -248,11 +257,14 @@ priv manual fn kind[F](_slot: &F) -> str:
     else:
         return "<n>"
 
-# Adds the line of the field `name` to `help`.
-priv manual fn describe[F](slot: &F, name: &str, doc: &str, has_default: bool, help: &mut Help):
+# Adds the line of the field `name` to `help`. `short` is its one-letter option, or "".
+priv manual fn describe[F](slot: &F, name: &str, doc: &str, has_default: bool, short: &str, help: &mut Help):
     mut text: str = doc.replace("\n", " ")
+    mut option: str = option_of(name)
+    if byte_len(short) > 0:
+        option = f"-{short}, {option}"
     comptime if F == bool:
-        help.names.push(option_of(name))
+        help.names.push(option)
     elif F == vector:
         help.usage += f" [{name}...]"
         help.names.push(f"<{name}>...")
@@ -262,7 +274,7 @@ priv manual fn describe[F](slot: &F, name: &str, doc: &str, has_default: bool, h
                 text += " "
             text += f"(default: {shown_value(slot)})"
         if has_default or holds_optional(slot):
-            help.names.push(f"{option_of(name)} {kind(slot)}")
+            help.names.push(f"{option} {kind(slot)}")
         else:
             help.usage += f" <{name}>"
             help.names.push(f"<{name}>")
@@ -297,7 +309,7 @@ manual fn help[T](program: &str, command: &str = "") -> str:
                 made.usage += f" {command}"
                 const shown: T = empty[T](v)
                 comptime for f in fields(v):
-                    describe(&field(shown, f), f.name, f.doc, f.has_default, &mut made)
+                    describe(&field(shown, f), f.name, f.doc, f.has_default, "", &mut made)
                 made.usage += " [options]"
                 made.names.push("--help")
                 made.texts.push("Show this help")
@@ -310,7 +322,7 @@ manual fn help[T](program: &str, command: &str = "") -> str:
     else:
         const start: T = empty[T]()
         comptime for f in fields(T):
-            describe(&field(start, f), f.name, f.doc, f.has_default, &mut made)
+            describe(&field(start, f), f.name, f.doc, f.has_default, f.decorator("short"), &mut made)
         made.usage += " [options]"
         made.names.push("--help")
         made.texts.push("Show this help")

@@ -1,6 +1,7 @@
 //! `comptime for f in fields(T):` runs its body once for each field of the struct `T`. In
 //! the body, `f.name` is the field's name, `f.doc` the comment above it, `f.has_default`
-//! whether it has a value of its own, and `field(x, f)` is that field of `x`.
+//! whether it has a value of its own, `f.decorator("short")` the text of `@short("v")` above
+//! it ("" without one), and `field(x, f)` is that field of `x`.
 //!
 //! `comptime for v in variants(T):` does the same for the cases of the enum `T`, with
 //! `v.name` and `v.doc`; there `fields(v)` are the fields of the case, `empty[T](v)` is a
@@ -139,6 +140,8 @@ struct Part {
     name: String,
     doc: String,
     has_default: bool,
+    /// The decorators above a field, by name, with their text.
+    decorators: Vec<(String, String)>,
     /// For a field of an enum's case: the name of the case.
     case: Option<String>,
     /// For a case: the type as written, to name it in the copies of the body.
@@ -195,6 +198,7 @@ impl Checker<'_> {
             name: f.name.clone(),
             doc: f.doc.clone(),
             has_default: f.default.is_some(),
+            decorators: f.decorators.clone(),
             case: case.clone(),
             of: None,
         };
@@ -223,6 +227,7 @@ impl Checker<'_> {
                     name: v.name.clone(),
                     doc: v.doc.clone(),
                     has_default: false,
+                    decorators: Vec::new(),
                     case: None,
                     of: Some(name.clone()),
                 };
@@ -350,6 +355,16 @@ fn use_part(expr: &mut Expr, var: &str, part: &Part) -> Result<()> {
                     return Err(Diagnostic::error(expr.span, format!("`{var}` has {known}, not `{other}`")));
                 }
             };
+        }
+        // `f.decorator("short")`: the text of `@short("v")` above the field, "" without one.
+        ExprKind::Method { receiver, name, args, .. }
+            if is_var(receiver) && name == "decorator" && part.of.is_none() =>
+        {
+            let [Expr { kind: ExprKind::Str(wanted), .. }] = args.as_slice() else {
+                return Err(Diagnostic::error(expr.span, format!("write `{var}.decorator(\"name\")`")));
+            };
+            let text = part.decorators.iter().find(|(n, _)| n == wanted).map(|(_, t)| t.clone());
+            expr.kind = ExprKind::Str(text.unwrap_or_default());
         }
         // `field(x, f)`: the field of a struct, or of the case of an enum that `x` is.
         ExprKind::Call { callee, args, .. }

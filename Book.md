@@ -1085,9 +1085,10 @@ managed struct Options:
     # The file to read
     source: str
     retries: i64 = 3
+    @short("v")
     verbose: bool = False
 
-o = args.parse[Options]()      # tool a.txt --retries 5 --verbose
+o = args.parse[Options]()      # tool a.txt --retries 5 -v
 ```
 
 ### `json`

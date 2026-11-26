@@ -1,0 +1,43 @@
+from io import print
+import args
+
+# Fetches a page.
+manual struct Options:
+    # Where to write it
+    @short("o")
+    output: Optional[str]
+    # Say what is being done
+    @short("v")
+    verbose: bool = False
+    @short("r")
+    retries: Optional[i64]
+    address: str
+
+managed fn run(words: vector[str]):
+    try:
+        o = args.to_struct[Options](words)
+        print(f"{o.address} {o.output} {o.verbose} {o.retries}")
+    except ArgsError as e:
+        print(f"error: {e.reason}")
+
+managed fn main():
+    run(["-v", "-o", "a.html", "example.com", "-r", "4"])
+    run(["example.com", "--output=b.html"])
+    run(["example.com", "-x"])
+    run(["example.com", "-o"])
+    run(["example.com", "-v=yes"])
+    print(args.help[Options]("fetch").replace("\n\n", "\n.\n"))
+# expect: example.com 'a.html' True 4
+# expect: example.com 'b.html' False None
+# expect: error: unknown option `-x`
+# expect: error: `-o` needs a value
+# expect: error: unknown option `-v=yes`
+# expect: Fetches a page.
+# expect: .
+# expect: Usage: fetch <address> [options]
+# expect: .
+# expect:   -o, --output <text>   Where to write it
+# expect:   -v, --verbose         Say what is being done
+# expect:   -r, --retries <n>
+# expect:   <address>
+# expect:   --help                Show this help

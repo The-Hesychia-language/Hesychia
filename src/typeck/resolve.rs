@@ -496,6 +496,7 @@ impl Collector<'_> {
                     private: false,
                     default: None,
                     doc: String::new(),
+                    decorators: Vec::new(),
                 };
                 let variants = e
                     .variants
@@ -743,7 +744,8 @@ impl Signer<'_> {
             }
             let default = self.field_default(field, &ty)?;
             let doc = field.doc.clone();
-            fields.push(FieldDef { name: field.name.clone(), ty, private: field.private, default, doc });
+            let decorators = field.decorators.clone();
+            fields.push(FieldDef { name: field.name.clone(), ty, private: field.private, default, doc, decorators });
         }
         self.tables.types.structs[id].fields = fields;
         let owner = Type::Struct(Named { id, name: s.name.clone() });
@@ -797,7 +799,7 @@ impl Signer<'_> {
             for f in &variant.fields {
                 let ty = self.field_type(&f.ty)?;
                 let default = self.field_default(f, &ty)?;
-                fields.push(FieldDef { name: f.name.clone(), ty, private: false, default, doc: f.doc.clone() });
+                fields.push(FieldDef { name: f.name.clone(), ty, private: false, default, doc: f.doc.clone(), decorators: Vec::new() });
             }
             variants.push(VariantDef { name: variant.name.clone(), fields, doc: variant.doc.clone() });
         }

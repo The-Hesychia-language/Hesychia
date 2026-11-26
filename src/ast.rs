@@ -212,6 +212,8 @@ pub struct FieldDecl {
     pub default: Option<Expr>,
     /// The comment above the field.
     pub doc: String,
+    /// `@short("v")` above the field: each decorator's name and the text it was given.
+    pub decorators: Vec<(String, String)>,
     pub span: Span,
 }
 
