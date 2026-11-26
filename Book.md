@@ -1133,6 +1133,18 @@ print(html.text(page))
 safe = html.escape(name.bytes())
 ```
 
+### `http`
+Requests to `http://` and `https://` addresses.
+```python
+import http
+
+r = http.get("https://example.com/")
+if r.status == http.Status.Ok and http.media_type(r) == "text/html":
+    tags = html.tags(r.body)
+print(f"{http.code(r.status)} {r.final_url}")
+sent = http.post("https://example.com/search", "q=tea".bytes())
+```
+
 ### `net`
 TCP and UDP connections.
 ```python
