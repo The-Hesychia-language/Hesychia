@@ -70,7 +70,7 @@ managed fn show(r: Response):
         print(text)
 
 managed fn main():
-    listener = net.listen("127.0.0.1", 47270)
+    listener = net.listen("127.0.0.1", 47270, timeout=10.0)
     t = spawn(serve, listener, 4)
     base = "http://127.0.0.1:47270"
     s = http.Session()

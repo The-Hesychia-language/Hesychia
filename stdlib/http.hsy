@@ -123,7 +123,16 @@ priv manual fn read_line(conn: &File, budget: &mut size) -> str raises IoError:
     mut line: vector[u8] = []
     mut done: bool = False
     while not done:
-        const got: vector[u8] = check io.sys_read(conn, 1)
+        mut got: vector[u8] = []
+        if len(line) == 0 and budget == HEAD_LIMIT:
+            # A failure before the first byte of an answer means the same as no answer: the
+            # server was gone (Linux says "reset", Windows "aborted"...).
+            try:
+                got = check io.sys_read(conn, 1)
+            except IoError as _e:
+                raise IoError(path="", reason=no_answer())
+        else:
+            got = check io.sys_read(conn, 1)
         if len(got) == 0:
             if len(line) == 0 and budget == HEAD_LIMIT:
                 raise IoError(path="", reason=no_answer())
@@ -624,15 +633,20 @@ priv manual fn exchange(s: &mut Session, verb: &str, u: &Url, body: &vector[u8],
     s.conns.clear()
     s.conn_to = ""
     if conn is not None:
+        # A kept connection the server has closed fails while the request is written or before
+        # the answer's first byte: the request then goes again on a new connection. A failure
+        # later in the answer is raised.
+        mut written: bool = False
         try:
             check send(&conn, s, verb, u, body, content_type)
+            written = True
             const (response, reusable): (Response, bool) = check read_response(&conn, verb, &address, limit)
             if reusable and not s.single:
                 s.conns.push(conn)
                 s.conn_to = to.copy()
             return response
         except IoError as e:
-            if e.reason != no_answer() and not e.reason.contains("roken pipe") and not e.reason.contains("reset"):
+            if written and e.reason != no_answer():
                 raise e
     const fresh: File = check open(u, timeout, verify)
     check send(&fresh, s, verb, u, body, content_type)
