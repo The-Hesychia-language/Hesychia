@@ -1,34 +1,56 @@
+# The test suite on the three systems Hesychia promises to run on.
 name: tests
+
 on:
   push:
+  pull_request:
+
 jobs:
-  debug:
-    runs-on: windows-latest
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+
+      # Hesychia emits C for MinGW on Windows: the compiler is built with Rust's GNU toolchain.
       - name: Rust's GNU toolchain (Windows)
+        if: runner.os == 'Windows'
         shell: bash
         run: |
           rustup toolchain install stable-x86_64-pc-windows-gnu --profile minimal
           rustup default stable-x86_64-pc-windows-gnu
+
+      # `hsy` and the tests call the C compiler `cc`: on Windows, MinGW's gcc under that name,
+      # beside it, where gcc finds its own parts.
+      - name: cc (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          GCC="$(command -v gcc)"
+          cp "$GCC" "$(dirname "$GCC")/cc.exe"
+          cc --version
+
+      # TLS (`net.connect_tls`) is OpenSSL's: Homebrew's on macOS, MSYS2's MinGW build on Windows,
+      # whose gcc then compiles the C, so the static libraries match it.
+      - name: OpenSSL (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          PREFIX="$(brew --prefix openssl@3)"
+          echo "CPATH=$PREFIX/include" >> "$GITHUB_ENV"
+          echo "LIBRARY_PATH=$PREFIX/lib" >> "$GITHUB_ENV"
+
       - name: OpenSSL (Windows)
+        if: runner.os == 'Windows'
         shell: bash
         run: |
           /c/msys64/usr/bin/pacman -S --noconfirm --needed mingw-w64-x86_64-gcc mingw-w64-x86_64-openssl
           [ -e /c/msys64/mingw64/bin/cc.exe ] || cp /c/msys64/mingw64/bin/gcc.exe /c/msys64/mingw64/bin/cc.exe
           echo 'C:\msys64\mingw64\bin' >> "$GITHUB_PATH"
-      - name: Link
+
+      - name: Tests
         shell: bash
-        run: |
-          ld --version | head -1
-          cargo build --release
-          ./target/release/hsy build tests/run/std_net_tls.hsy -o tls.exe --emit-c || true
-          set +e
-          for libs in "-lssl -lcrypto -lcrypt32 -lbcrypt -lws2_32" "-lssl -lcrypto -lcrypt32 -lbcrypt -luser32 -ladvapi32 -lws2_32"; do
-            echo "=== libs [$libs]"
-            cc -std=c11 -o v.exe tls.c -Os -ffunction-sections -fdata-sections -static -Wl,--gc-sections -s -pthread $libs -lm
-            echo "status $?"
-            ./v.exe; echo "run $?"
-            ls -la v.exe
-            rm -f v.exe
-          done
+        run: cargo test --release
