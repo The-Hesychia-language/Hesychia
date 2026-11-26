@@ -1,0 +1,24 @@
+from io import print
+import io
+import net
+from thread import spawn
+from io import File
+from net import Listener
+
+# Takes one connection and stays silent: no TLS handshake ever comes back.
+manual fn silent(owned listener: Listener):
+    try:
+        const conn: File = check net.accept(&listener)
+        check io.read_bytes_until(&conn, delimiter="")
+    except IoError as e:
+        print(f"server: {e.reason}")
+
+managed fn main():
+    listener = net.listen("127.0.0.1", 47230)
+    t = spawn(silent, listener)
+    try:
+        net.connect_tls("127.0.0.1", 47230, timeout=0.3)
+    except IoError as e:
+        print(f"{e.path}: {e.reason}")
+    t.join()
+# expect: 127.0.0.1:47230: timed out

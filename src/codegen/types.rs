@@ -34,6 +34,8 @@ pub struct TypeRegistry<'a> {
     pub uses_select: bool,
     /// `net` is used: sockets, and the C library that has them on Windows.
     pub uses_net: bool,
+    /// TLS connections: OpenSSL is included and linked.
+    pub uses_tls: bool,
     /// `upper` or `lower`: the Unicode case tables.
     pub uses_case: bool,
     /// Blocks of `shared[T]` values, defined after every other type: they hold a `T`.
@@ -64,6 +66,7 @@ impl<'a> TypeRegistry<'a> {
             uses_parallel: false,
             uses_select: false,
             uses_net: false,
+            uses_tls: false,
             uses_case: false,
             blocks: String::new(),
             panic_handler,
@@ -382,6 +385,9 @@ impl<'a> TypeRegistry<'a> {
         }
         if self.uses_net {
             out += super::runtime::NET;
+            if self.uses_tls {
+                out += super::runtime::TLS;
+            }
         } else if self.uses_str {
             out += super::runtime::CONN_STUB;
         }

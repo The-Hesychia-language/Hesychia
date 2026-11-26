@@ -1,6 +1,7 @@
 # url: takes a URL apart, and puts one together.
 #
 #     u = url.parse("https://example.com:8080/docs/a%20b?tag=x&tag=y#intro")
+#     u.scheme         Scheme.Https
 #     u.host           "example.com"
 #     u.path           "/docs/a b"
 #     u.query["tag"]   ['x', 'y']
@@ -12,10 +13,38 @@ manual struct UrlError:
     text: str
     reason: str
 
-# The parts of a URL. A part the URL does not have is "" (`None` for the port, no entry for
-# the query). `user` is what comes before `@` in "https://ann@example.com".
+# The scheme of a URL: `Http` and `Https` by name, any other as `Other`, `Other("mailto")`
+# (in lowercase). `Relative` for a link written without one: "/about", "//cdn.example.com/a.js".
+manual enum Scheme:
+    Http
+    Https
+    Other(name: str)
+    Relative
+
+    # The scheme as a URL writes it: "https", "mailto"; "" for `Relative`.
+    method name(&self) -> str:
+        match self:
+            case Scheme.Relative:
+                return ""
+            case Scheme.Http:
+                return "http"
+            case Scheme.Https:
+                return "https"
+            case Scheme.Other(name):
+                return name.copy()
+
+priv manual fn scheme_of(owned name: str) -> Scheme:
+    if name == "http":
+        return Scheme.Http
+    if name == "https":
+        return Scheme.Https
+    return Scheme.Other(name)
+
+# The parts of a URL. A part the URL does not have is "" (`Scheme.Relative` for the scheme,
+# `None` for the port, no entry for the query). `user` is what comes before `@` in
+# "https://ann@example.com".
 manual struct Url:
-    scheme: str
+    scheme: Scheme
     user: str
     host: str
     port: Optional[i32]
@@ -222,12 +251,12 @@ priv manual fn read_authority(text: &str, first: size, last: size, u: &mut Url) 
 
 # The parts of the URL written in `text`.
 manual fn parse(text: &str) -> Url raises UrlError:
-    mut u: Url = Url(scheme="", user="", host="", port=None, path="", query=dict[str, vector[str]](), fragment="", raw_path="")
+    mut u: Url = Url(scheme=Scheme.Relative, user="", host="", port=None, path="", query=dict[str, vector[str]](), fragment="", raw_path="")
     const n: size = byte_len(text)
     mut at: size = 0
     const scheme: size = scheme_len(text)
     if scheme > 0:
-        u.scheme = between(text, 0, scheme).lower()
+        u.scheme = scheme_of(between(text, 0, scheme).lower())
         at = scheme + 1
     const fragment_at: size = position(text, 35, at, n)
     const query_at: size = position(text, 63, at, fragment_at)
@@ -248,8 +277,8 @@ manual fn parse(text: &str) -> Url raises UrlError:
 # The URL that `u` describes, with what needs it encoded.
 manual fn to_text(u: &Url) -> str:
     mut out: str = ""
-    if len(u.scheme) > 0:
-        out += u.scheme
+    if u.scheme != Scheme.Relative:
+        out += u.scheme.name()
         out += ":"
     if len(u.host) > 0:
         out += "//"
@@ -310,7 +339,7 @@ manual fn join(base: &Url, link: &str) -> Url raises UrlError:
     mut to: Url = check parse(link)
     # Paths are joined as they are written: an encoded `/` (`%2F`) is not a separator.
     mut raw: str = path_text(&to)
-    if len(to.scheme) > 0:
+    if to.scheme != Scheme.Relative:
         const clean: str = without_dots(&raw)
         set_path(&mut to, &clean)
         return to

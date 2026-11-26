@@ -1115,6 +1115,8 @@ import url
 
 u = url.parse("https://a.com:8080/p?q=1")
 print(f"{u.host} {u.port}")
+if u.scheme == url.Scheme.Https:
+    print("secure")
 ```
 
 ### `html`
@@ -1131,6 +1133,18 @@ print(html.text(page))
 safe = html.escape(name.bytes())
 ```
 
+### `http`
+Requests to `http://` and `https://` addresses.
+```python
+import http
+
+r = http.get("https://example.com/")
+if r.status == http.Status.Ok and http.media_type(r) == "text/html":
+    tags = html.tags(r.body)
+print(f"{http.code(r.status)} {r.final_url}")
+sent = http.post("https://example.com/search", "q=tea".bytes())
+```
+
 ### `net`
 TCP and UDP connections.
 ```python
@@ -1140,6 +1154,13 @@ import net
 conn = net.connect("example.com", 80)
 print("GET / HTTP/1.0\r\n\r\n", to=conn)
 reply = io.read(conn, end="")
+```
+
+### TLS
+The same connection, encrypted; the certificate is checked.
+```python
+conn = net.connect_tls("example.com", 443)
+test = net.connect_tls("localhost", 8443, verify=False)   # self-signed
 ```
 
 ### `binary`

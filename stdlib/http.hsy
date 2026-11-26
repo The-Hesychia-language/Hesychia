@@ -1,0 +1,363 @@
+# http: HTTP/1.1 requests, to `http://` addresses over `net.connect`, and to `https://` ones
+# over `net.connect_tls`, the certificate checked.
+#
+#     response = http.get("https://example.com/")
+#     if response.status == http.Status.Ok and http.media_type(response) == "text/html":
+#         tags = html.tags(response.body)
+#
+# Whatever its status, what the server answers is a `Response`: a 404 is an answer, not an
+# error. A request that gets no answer (no connection, a rejected certificate, a timeout, a
+# body over `limit`, a broken answer) raises `HttpError`. A program that uses `http` is linked
+# with OpenSSL, as `https://` addresses need it (see `net.connect_tls`).
+
+import io
+import net
+import url
+from io import File, IoError
+from url import Url, Scheme, UrlError
+
+# A request that got no answer: why, and the address it was for.
+manual struct HttpError:
+    url: str
+    reason: str
+
+# The status of an answer: the common ones by name, any other as `Other(code)`.
+# `http.code(status)` gives the number.
+manual enum Status:
+    Ok
+    Created
+    NoContent
+    MovedPermanently
+    Found
+    NotModified
+    BadRequest
+    Unauthorized
+    Forbidden
+    NotFound
+    TooManyRequests
+    ServerError
+    BadGateway
+    Unavailable
+    Other(code: i64)
+
+# What the server answered. Header names are in lowercase; a header sent twice has its values
+# joined with ", ". `final_url` is the address the answer came from, after redirects.
+manual struct Response:
+    status: Status
+    headers: dict[str, str]
+    final_url: str
+    body: vector[u8]
+
+# The number of a status: 200 for `Status.Ok`.
+manual fn code(status: &Status) -> i64:
+    match status:
+        case Status.Ok:
+            return 200
+        case Status.Created:
+            return 201
+        case Status.NoContent:
+            return 204
+        case Status.MovedPermanently:
+            return 301
+        case Status.Found:
+            return 302
+        case Status.NotModified:
+            return 304
+        case Status.BadRequest:
+            return 400
+        case Status.Unauthorized:
+            return 401
+        case Status.Forbidden:
+            return 403
+        case Status.NotFound:
+            return 404
+        case Status.TooManyRequests:
+            return 429
+        case Status.ServerError:
+            return 500
+        case Status.BadGateway:
+            return 502
+        case Status.Unavailable:
+            return 503
+        case Status.Other(n):
+            return n
+
+priv manual fn status_of(n: i64) -> Status:
+    for status in [Status.Ok, Status.Created, Status.NoContent, Status.MovedPermanently, Status.Found, Status.NotModified, Status.BadRequest, Status.Unauthorized, Status.Forbidden, Status.NotFound, Status.TooManyRequests, Status.ServerError, Status.BadGateway, Status.Unavailable]:
+        if code(&status) == n:
+            return status
+    return Status.Other(n)
+
+# The value of the header `name` of `response`, in any case; `None` if it was not sent.
+manual fn header(response: &Response, name: &str) -> Optional[str]:
+    const key: str = name.lower()
+    return response.headers.get(&key)
+
+# What the body is, without its parameters, in lowercase: "text/html" for
+# "Text/HTML; charset=utf-8"; "" when the server does not say.
+manual fn media_type(response: &Response) -> str:
+    const value: Optional[str] = header(response, "content-type")
+    if value is None:
+        return ""
+    const parts: vector[str] = value.split(";")
+    return parts[0].strip().lower()
+
+# --- reading an answer -----------------------------------------------------------------------
+
+# The most the status line and the headers may take together: a server cannot fill the memory
+# with an endless header.
+priv comptime HEAD_LIMIT: size = 65536
+
+priv manual fn broken(reason: &str) -> IoError:
+    return IoError(path="", reason=f"{reason}")
+
+# One line of the head of the answer, without its "\r\n"; `budget` is what the head may still
+# take.
+priv manual fn read_line(conn: &File, budget: &mut size) -> str raises IoError:
+    mut line: vector[u8] = []
+    mut done: bool = False
+    while not done:
+        const got: vector[u8] = check io.sys_read(conn, 1)
+        if len(got) == 0:
+            raise broken("the answer ended in its headers")
+        if budget == 0:
+            raise broken(f"the headers are longer than {HEAD_LIMIT} bytes")
+        budget -= 1
+        if got[0] == 10:
+            done = True
+        else:
+            line.push(got[0])
+    if len(line) > 0 and line[len(line) - 1] == 13:
+        line.pop()
+    const text: Optional[str] = str.from_bytes(&line)
+    if text is None:
+        raise broken("a header is not text")
+    return text
+
+# The code of a status line, "HTTP/1.1 404 Not Found".
+priv manual fn status_code(line: &str) -> i64 raises IoError:
+    const parts: vector[str] = line.split(" ")
+    if len(parts) < 2 or not parts[0].starts_with("HTTP/") or byte_len(parts[1]) != 3:
+        raise broken(f"not an HTTP answer: {line}")
+    mut n: i64 = 0
+    for i in range(byte_len(parts[1])):
+        const b: u8 = parts[1].byte(i)
+        if b < 48 or b > 57:
+            raise broken(f"not an HTTP status: {parts[1]}")
+        n = n * 10 + i64(b - 48)
+    return n
+
+# Reads the headers, up to the empty line that ends them, into `headers`.
+priv manual fn read_headers(conn: &File, headers: &mut dict[str, str], budget: &mut size) raises IoError:
+    mut line: str = check read_line(conn, budget)
+    while byte_len(line) > 0:
+        const colon: Optional[size] = line.find(":")
+        if colon is None:
+            raise broken(f"not a header: {line}")
+        const name: str = line[0:colon].strip().lower()
+        const value: str = line[colon + 1:len(line)].strip()
+        if name in headers:
+            const before: str = headers[name].copy()
+            headers[name] = f"{before}, {value}"
+        else:
+            headers[name] = value
+        line = check read_line(conn, budget)
+
+# Adds what the connection gives to `body`, up to `count` bytes, or all that is left for
+# `None`; past `limit` bytes of body, raises.
+priv manual fn read_body(conn: &File, body: &mut vector[u8], count: Optional[size], limit: size) raises IoError:
+    mut left: size = limit + 1
+    if count is not None:
+        if count > limit - len(body) or len(body) > limit:
+            raise broken(f"the body is larger than {limit} bytes")
+        left = count
+    while left > 0:
+        mut wanted: size = 65536
+        if left < wanted:
+            wanted = left
+        const piece: vector[u8] = check io.sys_read(conn, wanted)
+        if len(piece) == 0:
+            if count is not None:
+                raise broken("the answer ended before its body")
+            return
+        left -= len(piece)
+        body.extend(piece)
+        if len(body) > limit:
+            raise broken(f"the body is larger than {limit} bytes")
+
+priv manual fn hex_digit(b: u8) -> Optional[size]:
+    if b >= 48 and b <= 57:
+        return size(b - 48)
+    if b >= 97 and b <= 102:
+        return size(b - 87)
+    if b >= 65 and b <= 70:
+        return size(b - 55)
+    return None
+
+# A body sent in pieces, each after its size in hex: "1a\r\n...\r\n0\r\n\r\n".
+priv manual fn read_chunks(conn: &File, body: &mut vector[u8], limit: size) raises IoError:
+    mut budget: size = HEAD_LIMIT
+    mut last: bool = False
+    while not last:
+        const line: str = check read_line(conn, &mut budget)
+        mut n: size = 0
+        mut digits: size = 0
+        mut i: size = 0
+        while i < byte_len(line) and hex_digit(line.byte(i)) is not None:
+            const digit: Optional[size] = hex_digit(line.byte(i))
+            if digit is not None:
+                if n > limit:
+                    raise broken(f"the body is larger than {limit} bytes")
+                n = n * 16 + digit
+            digits += 1
+            i += 1
+        if digits == 0:
+            raise broken(f"not the size of a piece of body: {line}")
+        if n == 0:
+            last = True
+        else:
+            check read_body(conn, body, n, limit)
+            const end: str = check read_line(conn, &mut budget)
+            if byte_len(end) > 0:
+                raise broken("a piece of body is longer than its size")
+            budget = HEAD_LIMIT
+    # Trailers, which come as headers, and are left.
+    mut trailers: dict[str, str] = dict[str, str]()
+    check read_headers(conn, &mut trailers, &mut budget)
+
+# The answer that comes on `conn` to a request of `verb`.
+priv manual fn read_response(conn: &File, verb: &str, address: &str, limit: size) -> Response raises IoError:
+    mut budget: size = HEAD_LIMIT
+    mut n: i64 = 100
+    mut headers: dict[str, str] = dict[str, str]()
+    # A "100 Continue" (or another 1xx) comes before the real answer.
+    while n >= 100 and n < 200:
+        const line: str = check read_line(conn, &mut budget)
+        n = check status_code(&line)
+        headers = dict[str, str]()
+        check read_headers(conn, &mut headers, &mut budget)
+    mut body: vector[u8] = []
+    if verb != "HEAD" and n != 204 and n != 304:
+        const coding: Optional[str] = headers.get(&"transfer-encoding")
+        const length: Optional[str] = headers.get(&"content-length")
+        if coding is not None and coding.lower().contains("chunked"):
+            check read_chunks(conn, &mut body, limit)
+        elif length is not None:
+            mut count: size = 0
+            const digits: str = length.strip()
+            if byte_len(digits) == 0 or byte_len(digits) > 18:
+                raise broken(f"not a length: {length}")
+            for i in range(byte_len(digits)):
+                const b: u8 = digits.byte(i)
+                if b < 48 or b > 57:
+                    raise broken(f"not a length: {length}")
+                count = count * 10 + size(b - 48)
+            check read_body(conn, &mut body, count, limit)
+        else:
+            check read_body(conn, &mut body, None, limit)
+    return Response(status=status_of(n), headers=headers, final_url=address.copy(), body=body)
+
+# --- sending a request -----------------------------------------------------------------------
+
+# The port of `u`: its own, or the one of its scheme.
+priv manual fn port_of(u: &Url) -> i32:
+    if u.port is not None:
+        return u.port
+    if u.scheme == Scheme.Https:
+        return 443
+    return 80
+
+# What follows the method on the request line: the path and the query, "/search?q=a%20b".
+priv manual fn target_of(u: &Url) -> str:
+    mut t: Url = u.copy()
+    t.scheme = Scheme.Relative
+    t.user = ""
+    t.host = ""
+    t.port = None
+    t.fragment = ""
+    const text: str = url.to_text(&t)
+    if not text.starts_with("/"):
+        return "/" + text
+    return text
+
+# The `Host` header: the host, and its port when it is not the scheme's.
+priv manual fn host_of(u: &Url) -> str:
+    mut host: str = u.host.copy()
+    if host.contains(":"):
+        host = f"[{host}]"
+    if u.port is not None:
+        host += f":{u.port}"
+    return host
+
+priv manual fn open(u: &Url, timeout: f64, verify: bool) -> File raises IoError:
+    if u.scheme == Scheme.Https:
+        return check net.connect_tls(&u.host, port_of(u), timeout, verify)
+    return check net.connect(&u.host, port_of(u), timeout)
+
+# Sends one request to `u`, and reads its answer.
+priv manual fn exchange(verb: &str, u: &Url, body: &vector[u8], content_type: &str, timeout: f64, limit: size, verify: bool) -> Response raises IoError:
+    const conn: File = check open(u, timeout, verify)
+    mut head: str = f"{verb} {target_of(u)} HTTP/1.1\r\nHost: {host_of(u)}\r\nUser-Agent: hesychia-http\r\nAccept: */*\r\nAccept-Encoding: identity\r\nConnection: close\r\n"
+    if verb == "POST":
+        head += f"Content-Type: {content_type}\r\nContent-Length: {len(body)}\r\n"
+    head += "\r\n"
+    const bytes: vector[u8] = head.bytes()
+    check io.sys_write(&conn, &bytes)
+    if len(body) > 0:
+        check io.sys_write(&conn, body)
+    const address: str = url.to_text(u)
+    return check read_response(&conn, verb, &address, limit)
+
+priv manual fn is_redirect(n: i64) -> bool:
+    return n == 301 or n == 302 or n == 303 or n == 307 or n == 308
+
+# Sends the request, and follows up to `redirects` redirects. A 303, and a 301 or a 302 after
+# a POST, go on as a GET without the body, as browsers do; a 307 or a 308 keep both.
+priv manual fn request(verb: &str, address: &str, body: &vector[u8], content_type: &str, timeout: f64, redirects: i64, limit: size, verify: bool) -> Response raises HttpError:
+    mut current: str = address.copy()
+    mut current_verb: str = verb.copy()
+    mut sent: vector[u8] = body.copy()
+    mut left: i64 = redirects
+    while True:
+        mut u: Url = Url(scheme=Scheme.Relative, user="", host="", port=None, path="", query=dict[str, vector[str]](), fragment="", raw_path="")
+        try:
+            u = check url.parse(&current)
+        except UrlError as e:
+            raise HttpError(url=current.copy(), reason=e.reason.copy())
+        if u.scheme != Scheme.Http and u.scheme != Scheme.Https:
+            raise HttpError(url=current.copy(), reason="only http:// and https:// addresses are taken")
+        if byte_len(u.host) == 0:
+            raise HttpError(url=current.copy(), reason="the address has no host")
+        mut response: Response = Response(status=Status.Ok, headers=dict[str, str](), final_url="", body=[])
+        try:
+            response = check exchange(&current_verb, &u, &sent, content_type, timeout, limit, verify)
+        except IoError as e:
+            raise HttpError(url=current.copy(), reason=e.reason.copy())
+        const n: i64 = code(&response.status)
+        const location: Optional[str] = header(&response, "location")
+        if not is_redirect(n) or location is None or redirects <= 0:
+            return response
+        if left == 0:
+            raise HttpError(url=current.copy(), reason=f"more than {redirects} redirects")
+        left -= 1
+        try:
+            const next: Url = check url.join(&u, &location)
+            current = url.to_text(&next)
+        except UrlError as e:
+            raise HttpError(url=current.copy(), reason=e.reason.copy())
+        if n == 303 or ((n == 301 or n == 302) and current_verb == "POST"):
+            current_verb = "GET"
+            sent = []
+
+# The answer to a GET of `address`, after up to `redirects` redirects (0 gives the redirect
+# itself). `timeout` limits connecting and each wait for the server, in seconds; a body over
+# `limit` bytes raises, 50 MiB by default. `verify=False` takes any certificate for an
+# `https://` address (see `net.connect_tls`).
+manual fn get(address: &str, timeout: f64 = 10.0, redirects: i64 = 5, limit: size = 52428800, verify: bool = True) -> Response raises HttpError:
+    const empty: vector[u8] = []
+    return check request("GET", address, &empty, "", timeout, redirects, limit, verify)
+
+# The answer to a POST of `body` to `address`, as `get` gives one. `content_type` says what
+# the body is: a form, by default, as `"q=" + url.encode(term)` builds one.
+manual fn post(address: &str, body: &vector[u8], content_type: &str = "application/x-www-form-urlencoded", timeout: f64 = 10.0, redirects: i64 = 5, limit: size = 52428800, verify: bool = True) -> Response raises HttpError:
+    return check request("POST", address, body, content_type, timeout, redirects, limit, verify)

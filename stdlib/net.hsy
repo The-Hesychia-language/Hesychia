@@ -1,5 +1,5 @@
 # net: TCP connections, which are `io.File`s read with `io.read` and written with `print`,
-# and UDP sockets. A host is a name or an IP address, IPv4 or IPv6.
+# TLS ones (`connect_tls`) too, and UDP sockets. A host is a name or an IP address, IPv4 or IPv6.
 #
 # `timeout` is in seconds: a wait that lasts longer fails with an `IoError` whose reason is
 # "timed out". 0, the default, waits without limit.
@@ -26,6 +26,8 @@ priv extern fn c_sender() -> ptr[u8]
 priv extern fn c_close(socket: i64)
 @symbol("hsy_net_wrap")
 priv extern fn c_wrap(socket: i64) -> ptr[u8]
+@symbol("hsy_tls_wrap")
+priv extern fn c_tls(socket: i64, host: ptr[u8], verify: i32) -> Optional[ptr[u8]]
 @symbol("hsy_net_error")
 priv extern fn c_error() -> ptr[u8]
 
@@ -56,6 +58,24 @@ manual fn connect(host: &str, port: i32, timeout: f64 = 0.0) -> File raises IoEr
     if socket < 0:
         raise failure(&address)
     return from_connection(c_wrap(socket), &address)
+
+# A connection as `connect` makes one, through which what goes is encrypted with TLS (1.2 at
+# least), as HTTPS does. The server must show a certificate for `host` that the system trusts.
+# `verify=False` takes any certificate: the connection is still encrypted, but anyone on the
+# way can pose as the server; it is for test servers and self-signed ones. A program that uses
+# TLS is linked with OpenSSL (`libssl`), which must be installed where it is built.
+manual fn connect_tls(host: &str, port: i32, timeout: f64 = 0.0, verify: bool = True) -> File raises IoError:
+    const address: str = f"{host}:{port}"
+    const socket: i64 = c_connect(host.to_c(), port, timeout)
+    if socket < 0:
+        raise failure(&address)
+    mut checked: i32 = 0
+    if verify:
+        checked = 1
+    const conn: Optional[ptr[u8]] = c_tls(socket, host.to_c(), checked)
+    if conn is None:
+        raise failure(&address)
+    return from_connection(conn, &address)
 
 # Waits for connections on `port`; `host` is the address to take them on, "0.0.0.0" for any.
 # `timeout` limits each `accept`, then each read and write on the connections it gives.
