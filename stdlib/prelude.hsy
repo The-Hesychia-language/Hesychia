@@ -208,6 +208,25 @@ extend str:
             return None
         return char_of(self, at)
 
+    # The text from the byte `start` to the byte `end`, counted as `byte` and `byte_len`
+    # count; both must be at the start of a character.
+    method byte_slice(&self, start: size, end: size) -> str:
+        return bytes_of(self, start, end)
+
+    # `DryRun` as `dry-run`: in lowercase, with a `-` before each capital letter but a first
+    # one (ASCII). `args`, `json` and `csv` write the cases of an enum this way.
+    method kebab_case(&self) -> str:
+        mut out: vector[u8] = []
+        for i in range(byte_len(self)):
+            const b: u8 = self.byte(i)
+            if b >= 65 and b <= 90:
+                if i > 0:
+                    out.push(45)
+                out.push(b + 32)
+            else:
+                out.push(b)
+        return text_of(&out)
+
     # `s[start:end]`, by characters.
     method slice(&self, start: size, end: size) -> str:
         const first: size = byte_of(self, start)

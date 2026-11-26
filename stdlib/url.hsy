@@ -89,15 +89,6 @@ priv manual fn hex_digit(n: u8) -> u8:
         return n + 48
     return n + 55
 
-priv manual fn between(text: &str, start: size, end: size) -> str:
-    mut out: vector[u8] = []
-    for i in range(start, end):
-        out.push(text.byte(i))
-    const piece: Optional[str] = str.from_bytes(&out)
-    if piece is None:
-        return ""
-    return piece
-
 # Where `wanted` first is in `text`, from `start` and before `end`; `end` if it is not there.
 priv manual fn position(text: &str, wanted: u8, start: size, end: size) -> size:
     for i in range(start, end):
@@ -143,7 +134,7 @@ priv manual fn decoded(text: &str, start: size, end: size, plus: bool) -> str:
         i += taken
     const made: Optional[str] = str.from_bytes(&out)
     if made is None:
-        return between(text, start, end)
+        return text.byte_slice(start, end)
     return made
 
 # The path of `u` as it is written in a URL.
@@ -254,7 +245,7 @@ priv manual fn read_authority(text: &str, first: size, last: size, u: &mut Url) 
     if start < last and text.byte(start) == 91:
         # An IPv6 address, in brackets: its `:` are not the port's.
         const close: size = position(text, 93, start, last)
-        u.host = between(text, start + 1, close).lower()
+        u.host = text.byte_slice(start + 1, close).lower()
         if close + 1 < last and text.byte(close + 1) == 58:
             port_at = close + 2
     else:
@@ -280,7 +271,7 @@ manual fn parse(text: &str) -> Url raises UrlError:
     mut at: size = 0
     const scheme: size = scheme_len(text)
     if scheme > 0:
-        u.scheme = scheme_of(between(text, 0, scheme).lower())
+        u.scheme = scheme_of(text.byte_slice(0, scheme).lower())
         at = scheme + 1
     const fragment_at: size = position(text, 35, at, n)
     const query_at: size = position(text, 63, at, fragment_at)
@@ -288,7 +279,7 @@ manual fn parse(text: &str) -> Url raises UrlError:
         const end: size = position(text, 47, at + 2, query_at)
         check read_authority(text, at + 2, end, &mut u)
         at = end
-    const raw: str = between(text, at, query_at)
+    const raw: str = text.byte_slice(at, query_at)
     set_path(&mut u, &raw)
     if query_at < fragment_at:
         read_query(text, query_at + 1, fragment_at, &mut u.query)
@@ -384,7 +375,7 @@ manual fn join(base: &Url, link: &str) -> Url raises UrlError:
         if folder == 0 and len(base.host) > 0:
             raw = "/" + raw
         else:
-            raw = between(&base_raw, 0, folder) + raw
+            raw = base_raw.byte_slice(0, folder) + raw
     const clean: str = without_dots(&raw)
     set_path(&mut to, &clean)
     return to

@@ -301,19 +301,6 @@ priv manual fn holds_optional[T](_slot: &T) -> bool:
     else:
         return False
 
-# The name of the case `name` in JSON: `DryRun` is "dry-run", as `args` writes it.
-priv manual fn case_text(name: &str) -> str:
-    mut out: vector[u8] = []
-    for i in range(byte_len(name)):
-        const b: u8 = name.byte(i)
-        if b >= 65 and b <= 90:
-            if i > 0:
-                out.push(45)
-            out.push(b + 32)
-        else:
-            out.push(b)
-    return text_of(&out)
-
 # Sets `out` to the case of the enum `T` that `value` names. Its cases carry no data.
 priv manual fn fill_case[T](out: &mut T, value: &Value) raises JsonError:
     mut names: vector[str] = []
@@ -322,12 +309,12 @@ priv manual fn fill_case[T](out: &mut T, value: &Value) raises JsonError:
             comptime assert(False, "json reads an enum whose cases carry no data")
         match value:
             case Value.Text(text):
-                if text == case_text(v.name):
+                if text == v.name.kebab_case():
                     out = empty[T](v)
                     return
             case _:
                 pass
-        names.push(f"\"{case_text(v.name)}\"")
+        names.push(f"\"{v.name.kebab_case()}\"")
     raise refused(f"expected one of {", ".join(&names)}")
 
 # Sets `out` from `value`.
@@ -479,7 +466,7 @@ priv manual fn to_value[T](x: &T) -> Value:
     elif is_enum(T):
         comptime for v in variants(T):
             if x == empty[T](v):
-                return Value.Text(case_text(v.name))
+                return Value.Text(v.name.kebab_case())
         return Value.Null
     elif is_struct(T):
         mut entries: dict[str, Value] = dict()

@@ -780,15 +780,6 @@ priv manual fn run(prog: &Program, text: &str, start: size, advance: bool) -> ve
         pos += n
     return found
 
-priv manual fn bytes_between(text: &str, start: size, end: size) -> str:
-    mut out: vector[u8] = []
-    for i in range(start, end):
-        out.push(text.byte(i))
-    const piece: Optional[str] = str.from_bytes(&out)
-    if piece is None:
-        return ""
-    return piece
-
 priv manual fn group_texts(text: &str, slots: &vector[i64]) -> vector[str]:
     mut texts: vector[str] = []
     for g in range(len(slots) // 2):
@@ -797,7 +788,7 @@ priv manual fn group_texts(text: &str, slots: &vector[i64]) -> vector[str]:
         if a < 0 or b < 0:
             texts.push("")
         else:
-            texts.push(bytes_between(text, size(a), size(b)))
+            texts.push(text.byte_slice(size(a), size(b)))
     return texts
 
 priv manual fn match_of(text: &str, slots: &vector[i64], names: &vector[str]) -> Match:
@@ -827,7 +818,7 @@ manual fn find_all(pattern: &str, text: &str) -> vector[str] raises PatternError
         else:
             const a: size = size(slots[0])
             const b: size = size(slots[1])
-            out.push(bytes_between(text, a, b))
+            out.push(text.byte_slice(a, b))
             start = b
             advance = a == b
     return out
@@ -866,7 +857,7 @@ manual fn replace(pattern: &str, text: &str, new: &str) -> str raises PatternErr
         else:
             const a: size = size(slots[0])
             const b: size = size(slots[1])
-            out += bytes_between(text, copied, a)
+            out += text.byte_slice(copied, a)
             const texts: vector[str] = group_texts(text, &slots)
             mut i: size = 0
             while i < byte_len(new):
@@ -885,7 +876,7 @@ manual fn replace(pattern: &str, text: &str, new: &str) -> str raises PatternErr
                         else:
                             while j < byte_len(new) and is_word(new.byte(j)):
                                 j += 1
-                            const name: str = bytes_between(new, i + 3, j)
+                            const name: str = new.byte_slice(i + 3, j)
                             for n in range(1, len(prog.names)):
                                 if prog.names[n] == name:
                                     group = n
@@ -901,16 +892,19 @@ manual fn replace(pattern: &str, text: &str, new: &str) -> str raises PatternErr
                     elif d == 92:
                         out += "\\"
                     else:
-                        out += bytes_between(new, i, i + 2)
+                        # A `\` before any other character keeps both.
+                        const (_, n): (u32, size) = decoded(new, i + 1)
+                        skip = 1 + n
+                        out += new.byte_slice(i, i + skip)
                     i += skip
                 else:
                     const (_, n): (u32, size) = decoded(new, i)
-                    out += bytes_between(new, i, i + n)
+                    out += new.byte_slice(i, i + n)
                     i += n
             copied = b
             start = b
             advance = a == b
-    out += bytes_between(text, copied, byte_len(text))
+    out += text.byte_slice(copied, byte_len(text))
     return out
 
 # The parts of `text` between its matches; empty matches do not split.
@@ -928,9 +922,9 @@ manual fn split(pattern: &str, text: &str) -> vector[str] raises PatternError:
             const a: size = size(slots[0])
             const b: size = size(slots[1])
             if b > a:
-                out.push(bytes_between(text, copied, a))
+                out.push(text.byte_slice(copied, a))
                 copied = b
             start = b
             advance = a == b
-    out.push(bytes_between(text, copied, byte_len(text)))
+    out.push(text.byte_slice(copied, byte_len(text)))
     return out

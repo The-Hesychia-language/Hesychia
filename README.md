@@ -229,7 +229,7 @@ The standard library is written in Hesychia, in `stdlib/`, and built into `hsy`:
 
 | Prelude | |
 |---|---|
-| `str` | `bytes()` (the UTF-8 bytes, as a `vector[u8]`), `starts_with`, `ends_with`, `find` (a character position), `strip()` and `strip(side=Side.Start)` or `side=Side.End`, `split(sep)` and `split()` on spaces, `replace`, `upper`, `lower` (Unicode, as Python: `"straße".upper()` is `"STRASSE"`), `sep.join(parts)`, `s[a:b]` by characters, `part in s` |
+| `str` | `bytes()` (the UTF-8 bytes, as a `vector[u8]`), `byte_slice(start, end)` (the text between two bytes, as `byte` and `byte_len` count, each at the start of a character), `kebab_case()` (`"DryRun"` is `"dry-run"`, as `args`, `json` and `csv` name the cases of an enum), `starts_with`, `ends_with`, `find` (a character position), `strip()` and `strip(side=Side.Start)` or `side=Side.End`, `split(sep)` and `split()` on spaces, `replace`, `upper`, `lower` (Unicode, as Python: `"straße".upper()` is `"STRASSE"`), `sep.join(parts)`, `s[a:b]` by characters, `part in s` |
 | `vector` | `contains`, `find`, `count`, `reverse`, `extend`, `sort` (stable), `v[a:b]` (a copy), `x in v`; `swap(i, j)` is the compiler's |
 | `dict[K, V]` | `d = dict[str, i32]()`, `d[k] = v`, `d[k] += 1`, `k in d`, `len(d)`, `get`, `remove`, `clear`, `keys`, `values`, `items`, in the order entries were added; a missing key in `d[k]` stops the program; written `{'a': 1}` |
 | `set[T]` | `add`, `remove`, `in`, `len`, `clear`, `values`, `union`, `intersection`; written `{1, 2}`, or `set()` when empty |

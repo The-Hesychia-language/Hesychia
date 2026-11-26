@@ -48,12 +48,12 @@ manual struct Scanner:
 
     # The next character, without taking it; "" at the end.
     method peek(&self) -> str:
-        return cut(&self.text, self.at, char_end(&self.text, self.at))
+        return self.text.byte_slice(self.at, char_end(&self.text, self.at))
 
     # Takes the next character; "" at the end.
     method next(&mut self) -> str:
         const end: size = char_end(&self.text, self.at)
-        const taken: str = cut(&self.text, self.at, end)
+        const taken: str = self.text.byte_slice(self.at, end)
         self.at = end
         return taken
 
@@ -79,14 +79,14 @@ manual struct Scanner:
         const start: size = self.at
         while self.at < byte_len(self.text) and in_class(self.text.byte(self.at), class):
             self.at += 1
-        return cut(&self.text, start, self.at)
+        return self.text.byte_slice(start, self.at)
 
     # Takes everything up to `stop`, which is left to come next, or up to the end.
     method take_until(&mut self, stop: &str) -> str:
         const start: size = self.at
         while self.at < byte_len(self.text) and not starts_at(&self.text, self.at, stop):
             self.at = char_end(&self.text, self.at)
-        return cut(&self.text, start, self.at)
+        return self.text.byte_slice(start, self.at)
 
     # Takes the characters that are not among `chars`: `take_except(",\n")` takes a field.
     method take_except(&mut self, chars: &str) -> str:
@@ -96,7 +96,7 @@ manual struct Scanner:
             if among(chars, &self.text, self.at, end):
                 break
             self.at = end
-        return cut(&self.text, start, self.at)
+        return self.text.byte_slice(start, self.at)
 
     # Where reading has come to, for `since` and `error_at`.
     method mark(&self) -> size:
@@ -104,11 +104,11 @@ manual struct Scanner:
 
     # What has been taken since `mark` gave `start`.
     method since(&self, start: size) -> str:
-        return cut(&self.text, start, self.at)
+        return self.text.byte_slice(start, self.at)
 
     # What is left to read, without taking it.
     method rest(&self) -> str:
-        return cut(&self.text, self.at, byte_len(self.text))
+        return self.text.byte_slice(self.at, byte_len(self.text))
 
     # The line that reading has come to, from 1.
     method line(&self) -> size:
@@ -186,16 +186,6 @@ priv manual fn among(chars: &str, text: &str, start: size, end: size) -> bool:
             return True
         i = char_end(chars, i)
     return False
-
-# The text from the byte `start` to the byte `end`, both at the start of a character.
-priv manual fn cut(text: &str, start: size, end: size) -> str:
-    mut out: vector[u8] = []
-    for i in range(start, end):
-        out.push(text.byte(i))
-    const piece: Optional[str] = str.from_bytes(&out)
-    if piece is None:
-        return ""
-    return piece
 
 # The line and column of the byte `at`, from 1, in characters.
 priv manual fn place(text: &str, at: size) -> (size, size):
