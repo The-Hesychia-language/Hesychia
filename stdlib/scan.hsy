@@ -1,0 +1,211 @@
+# scan: reads a text piece by piece, for parsers written by hand.
+#
+#     s = scan.over("name = \"Ann\"  # a comment")
+#     key = s.take_while(scan.Class.Word)      "name"
+#     s.skip_space()
+#     s.expect("=")                            raises ScanError(line, column, reason) if not
+#     s.skip_space()
+#     if s.eat("\""):
+#         value = s.take_until("\"")           "Ann"
+#         s.expect("\"")
+#
+# A scanner keeps its own copy of the text and where it is in it. What it takes is text,
+# cut between characters; `line` and `column` count characters from 1, as an editor shows
+# them. The classes of characters are ASCII, as `re` has them.
+
+# Text that is not what a parser expected, and where, counted from 1 in characters.
+manual struct ScanError:
+    line: size
+    column: size
+    reason: str
+
+# Kinds of characters, for `take_while`.
+manual enum Class:
+    # `0` to `9`
+    Digit
+    # `0` to `9`, `a` to `f`, `A` to `F`
+    HexDigit
+    # `a` to `z`, `A` to `Z`
+    Letter
+    # a letter, a digit or `_`
+    Word
+    # a space, a tab or a line break
+    Space
+
+# A text, and where reading it has come to.
+manual struct Scanner:
+    priv text: str
+    # In bytes, always at the start of a character.
+    priv at: size
+
+    # Whether the whole text has been read.
+    method at_end(&self) -> bool:
+        return self.at >= byte_len(self.text)
+
+    # Whether what comes next is `word`, without taking it.
+    method next_is(&self, word: &str) -> bool:
+        return starts_at(&self.text, self.at, word)
+
+    # The next character, without taking it; "" at the end.
+    method peek(&self) -> str:
+        return cut(&self.text, self.at, char_end(&self.text, self.at))
+
+    # Takes the next character; "" at the end.
+    method next(&mut self) -> str:
+        const end: size = char_end(&self.text, self.at)
+        const taken: str = cut(&self.text, self.at, end)
+        self.at = end
+        return taken
+
+    # Takes `word` if it comes next, and says whether it did.
+    method eat(&mut self, word: &str) -> bool:
+        if not starts_at(&self.text, self.at, word):
+            return False
+        self.at += byte_len(word)
+        return True
+
+    # Takes `word`, which must come next.
+    method expect(&mut self, word: &str) raises ScanError:
+        if not self.eat(word):
+            raise self.error(f"expected `{word}`")
+
+    # Takes the spaces, tabs and line breaks that come next.
+    method skip_space(&mut self):
+        while self.at < byte_len(self.text) and in_class(self.text.byte(self.at), Class.Space):
+            self.at += 1
+
+    # Takes the characters of `class` that come next, "" if there are none.
+    method take_while(&mut self, class: Class) -> str:
+        const start: size = self.at
+        while self.at < byte_len(self.text) and in_class(self.text.byte(self.at), class):
+            self.at += 1
+        return cut(&self.text, start, self.at)
+
+    # Takes everything up to `stop`, which is left to come next, or up to the end.
+    method take_until(&mut self, stop: &str) -> str:
+        const start: size = self.at
+        while self.at < byte_len(self.text) and not starts_at(&self.text, self.at, stop):
+            self.at = char_end(&self.text, self.at)
+        return cut(&self.text, start, self.at)
+
+    # Takes the characters that are not among `chars`: `take_except(",\n")` takes a field.
+    method take_except(&mut self, chars: &str) -> str:
+        const start: size = self.at
+        while self.at < byte_len(self.text):
+            const end: size = char_end(&self.text, self.at)
+            if among(chars, &self.text, self.at, end):
+                break
+            self.at = end
+        return cut(&self.text, start, self.at)
+
+    # Where reading has come to, for `since` and `error_at`.
+    method mark(&self) -> size:
+        return self.at
+
+    # What has been taken since `mark` gave `start`.
+    method since(&self, start: size) -> str:
+        return cut(&self.text, start, self.at)
+
+    # What is left to read, without taking it.
+    method rest(&self) -> str:
+        return cut(&self.text, self.at, byte_len(self.text))
+
+    # The line that reading has come to, from 1.
+    method line(&self) -> size:
+        const (line, _): (size, size) = place(&self.text, self.at)
+        return line
+
+    # The column that reading has come to, in characters from 1.
+    method column(&self) -> size:
+        const (_, column): (size, size) = place(&self.text, self.at)
+        return column
+
+    # An error where reading has come to.
+    method error(&self, reason: &str) -> ScanError:
+        return self.error_at(self.at, reason)
+
+    # An error where `mark` was, as when a whole piece turns out wrong.
+    method error_at(&self, start: size, reason: &str) -> ScanError:
+        const (line, column): (size, size) = place(&self.text, start)
+        return ScanError(line=line, column=column, reason=f"{reason}")
+
+# A scanner at the start of `text`.
+manual fn over(text: &str) -> Scanner:
+    return Scanner(text=text.copy(), at=0)
+
+# --- bytes -------------------------------------------------------------------------------
+
+priv manual fn in_class(b: u8, class: Class) -> bool:
+    const digit: bool = b >= 48 and b <= 57
+    const letter: bool = (b >= 97 and b <= 122) or (b >= 65 and b <= 90)
+    match class:
+        case Class.Digit:
+            return digit
+        case Class.HexDigit:
+            return digit or (b >= 97 and b <= 102) or (b >= 65 and b <= 70)
+        case Class.Letter:
+            return letter
+        case Class.Word:
+            return digit or letter or b == 95
+        case Class.Space:
+            return b == 32 or b == 9 or b == 10 or b == 13
+
+priv manual fn starts_at(text: &str, at: size, word: &str) -> bool:
+    if at + byte_len(word) > byte_len(text):
+        return False
+    for i in range(byte_len(word)):
+        if text.byte(at + i) != word.byte(i):
+            return False
+    return True
+
+# Where the character at the byte `at` ends.
+priv manual fn char_end(text: &str, at: size) -> size:
+    if at >= byte_len(text):
+        return at
+    mut end: size = at + 1
+    while end < byte_len(text) and (text.byte(end) & 192) == 128:
+        end += 1
+    return end
+
+# Whether the character of `text` from `start` to `end` is one of `chars`.
+priv manual fn among(chars: &str, text: &str, start: size, end: size) -> bool:
+    const n: size = end - start
+    if n == 1:
+        const b: u8 = text.byte(start)
+        for i in range(byte_len(chars)):
+            if chars.byte(i) == b:
+                return True
+        return False
+    mut i: size = 0
+    while i + n <= byte_len(chars):
+        mut same: bool = True
+        for k in range(n):
+            if chars.byte(i + k) != text.byte(start + k):
+                same = False
+        if same:
+            return True
+        i = char_end(chars, i)
+    return False
+
+# The text from the byte `start` to the byte `end`, both at the start of a character.
+priv manual fn cut(text: &str, start: size, end: size) -> str:
+    mut out: vector[u8] = []
+    for i in range(start, end):
+        out.push(text.byte(i))
+    const piece: Optional[str] = str.from_bytes(&out)
+    if piece is None:
+        return ""
+    return piece
+
+# The line and column of the byte `at`, from 1, in characters.
+priv manual fn place(text: &str, at: size) -> (size, size):
+    mut line: size = 1
+    mut column: size = 1
+    for i in range(min(&at, byte_len(text))):
+        const b: u8 = text.byte(i)
+        if b == 10:
+            line += 1
+            column = 1
+        elif (b & 192) != 128:
+            column += 1
+    return (line, column)

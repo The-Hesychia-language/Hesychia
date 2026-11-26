@@ -1,0 +1,37 @@
+from io import print
+import scan
+from scan import Class, Scanner, ScanError
+
+manual fn read(text: &str) raises ScanError:
+    mut s: Scanner = scan.over(text)
+    const key: str = s.take_while(Class.Word)
+    s.skip_space()
+    check s.expect("=")
+    s.skip_space()
+    check s.expect("\"")
+    const value: str = s.take_until("\"")
+    check s.expect("\"")
+    print(f"{key} [{value}] {s.at_end()} [{s.peek()}]")
+
+managed fn main():
+    read("name = \"Ånn é\"  # x")
+    try:
+        read("ké = 1")
+    except ScanError as e:
+        print(f"{e.line}:{e.column}: {e.reason}")
+    s = scan.over("ab\ncé,d;e")
+    s.take_until("\n")
+    s.next()
+    m = s.mark()
+    field = s.take_except(",;")
+    print(f"{field} {s.since(m)} {s.line()}:{s.column()} {s.next()} {s.rest()} {s.eat("d")} {s.next_is(";")}")
+    s.next()
+    s.next()
+    print(f"{s.at_end()} [{s.next()}] [{s.peek()}]")
+    hex = scan.over("ff10zz")
+    print(hex.take_while(Class.HexDigit))
+# expect: name [Ånn é] False [ ]
+# expect: 1:2: expected `=`
+# expect: cé cé 2:3 , d;e True True
+# expect: True [] []
+# expect: ff10
