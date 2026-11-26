@@ -118,15 +118,15 @@ priv manual fn convert[F](slot: &mut F, text: &str, shown: &str) raises ArgsErro
         try:
             const fit: Optional[F] = F.checked(check i64(text))
             if fit is None:
-                raise ArgsError(reason=f"{shown}: `{text}` is too large")
+                raise ArgsError(reason=f"{shown}: `{text}`: too large")
             slot = fit
-        except ParseError as _e:
-            raise ArgsError(reason=f"{shown}: `{text}` is not a whole number")
+        except ParseError as e:
+            raise ArgsError(reason=f"{shown}: `{text}`: {e.reason}")
     elif F == f64:
         try:
             slot = check f64(text)
-        except ParseError as _e:
-            raise ArgsError(reason=f"{shown}: `{text}` is not a number")
+        except ParseError as e:
+            raise ArgsError(reason=f"{shown}: `{text}`: {e.reason}")
     elif F == Optional:
         mut one: item(F) = empty[item(F)]()
         check convert(&mut one, text, shown)

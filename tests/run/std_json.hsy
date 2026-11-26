@@ -27,19 +27,19 @@ managed fn main():
                     print("?")
         case _:
             print("not an object")
-    for bad in ["[1,", "{\"a\" 1}", "tru", "\"x", "1 2", "01", ""]:
+    for bad in ["{\n  \"é\": tru\n}", "[1,", "{\"a\" 1}", "tru", "\"x", "1 2", "01", ""]:
         try:
             load(bad)
             print("accepted")
         except JsonError as e:
-            print(f"{e.at}: {e.reason}")
+            print(f"{e.line}:{e.column}: {e.reason}")
     fs.remove("hsy-json-test.json")
     parsed = json.parse("[1, {\"a\": null}]")
     print(f"{json.to_text(parsed)} {json.to_text(json.parse("[]"), indent=2)}")
     try:
         json.parse("[1,")
     except JsonError as e:
-        print(f"{e.at}: {e.reason}")
+        print(f"{e.line}:{e.column}: {e.reason}")
 # expect: {"name":"Ana","tags":[1,2.5,true,null],"esc":"a\"bé😀\n","empty":{}}
 # expect: {
 # expect:   "name": "Ana",
@@ -54,12 +54,13 @@ managed fn main():
 # expect: }
 # expect: ['name', 'tags', 'esc', 'empty'] 4
 # expect: name Ana
-# expect: 3: expected a value
-# expect: 5: expected `:`
-# expect: 0: expected `true`
-# expect: 2: a string is not closed
-# expect: 2: text after the value
-# expect: 1: text after the value
-# expect: 0: expected a value
+# expect: 2:8: expected `true`
+# expect: 1:4: expected a value
+# expect: 1:6: expected `:`
+# expect: 1:1: expected `true`
+# expect: 1:3: a string is not closed
+# expect: 1:3: text after the value
+# expect: 1:2: text after the value
+# expect: 1:1: expected a value
 # expect: [1,{"a":null}] []
-# expect: 3: expected a value
+# expect: 1:4: expected a value

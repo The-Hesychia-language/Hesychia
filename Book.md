@@ -110,11 +110,16 @@ const bits: u32 = u32.reinterpret(1.0)
 ```
 
 ### Text to number
-Parse a number from a string; failure raises `ParseError`.
+Parse a number from a string; failure raises `ParseError`, whose `text` is what was read
+and `reason` says why ("not a whole number", "too large for `u8`").
 ```python
 n = i64("42")
 x = f64("2.5e1")
 s = str(n)
+try:
+    u8("300")
+except ParseError as e:
+    print(e.reason)               # too large for `u8`
 ```
 
 ---
