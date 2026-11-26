@@ -1145,6 +1145,17 @@ print(f"{http.code(r.status)} {r.final_url}")
 sent = http.post("https://example.com/search", "q=tea".bytes())
 ```
 
+### `http.Session`
+Requests that share a connection and cookies.
+```python
+session = http.Session()
+session.post("https://site/login", "user=ann&pw=secret".bytes())
+profile = session.get("https://site/profile")     # the login cookie goes with it
+session.set_cookie("site", "PHPSESSID", "abc123")
+sid = session.cookie("site", "PHPSESSID")         # Optional[str]
+session.close()
+```
+
 ### `net`
 TCP and UDP connections.
 ```python

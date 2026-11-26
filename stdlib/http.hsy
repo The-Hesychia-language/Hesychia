@@ -11,6 +11,7 @@
 # with OpenSSL, as `https://` addresses need it (see `net.connect_tls`).
 
 import io
+import time
 import net
 import url
 from io import File, IoError
@@ -108,6 +109,11 @@ manual fn media_type(response: &Response) -> str:
 # with an endless header.
 priv comptime HEAD_LIMIT: size = 65536
 
+# What a connection that closed before sending a byte raises: on a kept connection, the
+# server had closed it while idle, and the request is sent again on a new one.
+priv manual fn no_answer() -> str:
+    return "the server closed the connection without answering"
+
 priv manual fn broken(reason: &str) -> IoError:
     return IoError(path="", reason=f"{reason}")
 
@@ -119,6 +125,8 @@ priv manual fn read_line(conn: &File, budget: &mut size) -> str raises IoError:
     while not done:
         const got: vector[u8] = check io.sys_read(conn, 1)
         if len(got) == 0:
+            if len(line) == 0 and budget == HEAD_LIMIT:
+                raise IoError(path="", reason=no_answer())
             raise broken("the answer ended in its headers")
         if budget == 0:
             raise broken(f"the headers are longer than {HEAD_LIMIT} bytes")
@@ -157,8 +165,12 @@ priv manual fn read_headers(conn: &File, headers: &mut dict[str, str], budget: &
         const name: str = line[0:colon].strip().lower()
         const value: str = line[colon + 1:len(line)].strip()
         if name in headers:
+            # A cookie's date holds commas: cookies are kept one per line instead.
             const before: str = headers[name].copy()
-            headers[name] = f"{before}, {value}"
+            if name == "set-cookie":
+                headers[name] = f"{before}\n{value}"
+            else:
+                headers[name] = f"{before}, {value}"
         else:
             headers[name] = value
         line = check read_line(conn, budget)
@@ -225,15 +237,18 @@ priv manual fn read_chunks(conn: &File, body: &mut vector[u8], limit: size) rais
     mut trailers: dict[str, str] = dict[str, str]()
     check read_headers(conn, &mut trailers, &mut budget)
 
-# The answer that comes on `conn` to a request of `verb`.
-priv manual fn read_response(conn: &File, verb: &str, address: &str, limit: size) -> Response raises IoError:
+# The answer that comes on `conn` to a request of `verb`, and whether the connection can take
+# another request: an HTTP/1.1 answer whose end was known, without `Connection: close`.
+priv manual fn read_response(conn: &File, verb: &str, address: &str, limit: size) -> (Response, bool) raises IoError:
     mut budget: size = HEAD_LIMIT
     mut n: i64 = 100
     mut headers: dict[str, str] = dict[str, str]()
+    mut reusable: bool = True
     # A "100 Continue" (or another 1xx) comes before the real answer.
     while n >= 100 and n < 200:
         const line: str = check read_line(conn, &mut budget)
         n = check status_code(&line)
+        reusable = line.starts_with("HTTP/1.1 ")
         headers = dict[str, str]()
         check read_headers(conn, &mut headers, &mut budget)
     mut body: vector[u8] = []
@@ -255,7 +270,294 @@ priv manual fn read_response(conn: &File, verb: &str, address: &str, limit: size
             check read_body(conn, &mut body, count, limit)
         else:
             check read_body(conn, &mut body, None, limit)
-    return Response(status=status_of(n), headers=headers, final_url=address.copy(), body=body)
+            reusable = False
+    const connection: Optional[str] = headers.get(&"connection")
+    if connection is not None and connection.lower().contains("close"):
+        reusable = False
+    return (Response(status=status_of(n), headers=headers, final_url=address.copy(), body=body), reusable)
+
+
+# --- cookies ---------------------------------------------------------------------------------
+
+# A cookie a server set: sent back only to the host that set it (its `Domain` is not
+# followed, so that no cookie ever reaches another site), on the paths under `path`, only
+# over HTTPS when `secure`, until `expires` (seconds, as `time.timestamp()`; `None` for as
+# long as the session lives).
+priv manual struct Cookie:
+    host: str
+    name: str
+    value: str
+    path: str
+    secure: bool
+    expires: Optional[f64]
+
+priv manual fn month_of(word: &str) -> i64:
+    const months: vector[str] = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]
+    if byte_len(word) < 3:
+        return 0
+    const start: str = word[0:3].lower()
+    for i in range(len(months)):
+        if months[i] == start:
+            return i64(i) + 1
+    return 0
+
+priv manual fn number_of(word: &str) -> Optional[i64]:
+    if byte_len(word) == 0 or byte_len(word) > 4:
+        return None
+    mut n: i64 = 0
+    for i in range(byte_len(word)):
+        const b: u8 = word.byte(i)
+        if b < 48 or b > 57:
+            return None
+        n = n * 10 + i64(b - 48)
+    return n
+
+# Days from 1970-01-01 to a date of the Gregorian calendar.
+priv manual fn days_from_civil(year: i64, month: i64, day: i64) -> i64:
+    mut y: i64 = year
+    if month <= 2:
+        y -= 1
+    const era: i64 = y // 400
+    const of_era: i64 = y - era * 400
+    mut m: i64 = month + 9
+    if month > 2:
+        m = month - 3
+    const of_year: i64 = (153 * m + 2) // 5 + day - 1
+    const of_cycle: i64 = of_era * 365 + of_era // 4 - of_era // 100 + of_year
+    return era * 146097 + of_cycle - 719468
+
+# The time an `Expires` date stands for, in seconds since 1970, read as RFC 6265 reads it: in
+# any of the formats servers send ("Wed, 21 Oct 2026 07:28:00 GMT", "Wednesday, 21-Oct-26
+# 07:28:00 GMT", "Wed Oct 21 07:28:00 2026"); `None` if it is not a date.
+priv manual fn date_of(text: &str) -> Optional[f64]:
+    mut words: vector[str] = []
+    mut word: vector[u8] = []
+    for i in range(byte_len(text) + 1):
+        mut b: u8 = 32
+        if i < byte_len(text):
+            b = text.byte(i)
+        const kept: bool = (b >= 48 and b <= 58) or (b >= 65 and b <= 90) or (b >= 97 and b <= 122)
+        if kept:
+            word.push(b)
+        elif len(word) > 0:
+            const piece: Optional[str] = str.from_bytes(&word)
+            if piece is not None:
+                words.push(piece)
+            word = []
+    mut clock: Optional[(i64, i64, i64)] = None
+    mut day: i64 = 0
+    mut month: i64 = 0
+    mut year: i64 = -1
+    for w in &words:
+        const parts: vector[str] = w.split(":")
+        const n: Optional[i64] = number_of(w)
+        if clock is None and len(parts) == 3:
+            const hh: Optional[i64] = number_of(&parts[0])
+            const mm: Optional[i64] = number_of(&parts[1])
+            const ss: Optional[i64] = number_of(&parts[2])
+            if hh is not None and mm is not None and ss is not None:
+                clock = (hh, mm, ss)
+        elif day == 0 and n is not None and byte_len(w) <= 2 and n >= 1 and n <= 31:
+            day = n
+        elif month == 0 and month_of(w) > 0:
+            month = month_of(w)
+        elif year < 0 and n is not None and byte_len(w) >= 2:
+            year = n
+    if clock is None or day == 0 or month == 0 or year < 0:
+        return None
+    if year < 70:
+        year += 2000
+    elif year < 100:
+        year += 1900
+    if year < 1601 or clock[0] > 23 or clock[1] > 59 or clock[2] > 59:
+        return None
+    const days: i64 = days_from_civil(year, month, day)
+    return f64(days * 86400 + clock[0] * 3600 + clock[1] * 60 + clock[2])
+
+# The path a cookie gets without a `Path`: the folder of the request's path.
+priv manual fn default_path(path: &str) -> str:
+    if not path.starts_with("/"):
+        return "/"
+    mut last: size = 0
+    for i in range(byte_len(path)):
+        if path.byte(i) == 47:
+            last = i
+    if last == 0:
+        return "/"
+    return path[0:last]
+
+# Whether a cookie set for `cookie_path` goes with a request for `path`.
+priv manual fn path_matches(cookie_path: &str, path: &str) -> bool:
+    if path == cookie_path:
+        return True
+    if not path.starts_with(cookie_path):
+        return False
+    return cookie_path.ends_with("/") or path.byte(byte_len(cookie_path)) == 47
+
+# Whether `host` is an IP address, which has no parent domain: digits and dots, or IPv6.
+priv manual fn is_address(host: &str) -> bool:
+    if host.contains(":"):
+        return True
+    for i in range(byte_len(host)):
+        const b: u8 = host.byte(i)
+        if b != 46 and (b < 48 or b > 57):
+            return False
+    return True
+
+# The cookie a `Set-Cookie` value describes, for a request to `u`; `None` if it is not one
+# to keep (no name, or `Secure` but not over HTTPS).
+priv manual fn read_cookie(text: &str, u: &Url, now: f64) -> Optional[Cookie]:
+    const parts: vector[str] = text.split(";")
+    const first: str = parts[0].strip()
+    const equal: Optional[size] = first.find("=")
+    if equal is None:
+        return None
+    const name: str = first[0:equal].strip()
+    if byte_len(name) == 0:
+        return None
+    mut cookie: Cookie = Cookie(host=u.host.copy(), name=name, value=first[equal + 1:len(first)].strip(), path=default_path(&u.path), secure=False, expires=None)
+    mut max_age: Optional[f64] = None
+    for i in range(1, len(parts)):
+        const part: str = parts[i].strip()
+        const at: Optional[size] = part.find("=")
+        mut key: str = part.lower()
+        mut value: str = ""
+        if at is not None:
+            key = part[0:at].strip().lower()
+            value = part[at + 1:len(part)].strip()
+        if key == "path" and value.starts_with("/"):
+            cookie.path = value
+        elif key == "domain" and byte_len(value) > 0:
+            # Kept for this host alone either way; refused if it names a domain the host is
+            # not in, as a browser refuses it.
+            mut domain: str = value.lower()
+            if domain.starts_with("."):
+                domain = domain[1:len(domain)]
+            const suffix: str = "." + domain
+            if u.host != domain and (is_address(&u.host) or not u.host.ends_with(&suffix)):
+                return None
+        elif key == "secure":
+            cookie.secure = True
+        elif key == "expires":
+            const date: Optional[f64] = date_of(&value)
+            if date is not None:
+                cookie.expires = date
+        elif key == "max-age":
+            mut negative: bool = False
+            mut digits: str = value.copy()
+            if digits.starts_with("-"):
+                negative = True
+                digits = digits[1:len(digits)]
+            mut seconds: f64 = 0.0
+            mut valid: bool = byte_len(digits) > 0 and byte_len(digits) <= 12
+            for k in range(byte_len(digits)):
+                const b: u8 = digits.byte(k)
+                if b < 48 or b > 57:
+                    valid = False
+                else:
+                    seconds = seconds * 10.0 + f64(b - 48)
+            if valid:
+                if negative:
+                    seconds = 0.0
+                max_age = now + seconds
+    if max_age is not None:
+        cookie.expires = max_age
+    if cookie.secure and u.scheme != Scheme.Https:
+        return None
+    return cookie
+
+# --- sessions --------------------------------------------------------------------------------
+
+# Requests that share a connection and cookies, as a browser does between pages:
+#
+#     session = http.Session()
+#     session.post("https://site/login", "user=ann&pw=secret".bytes())
+#     profile = session.get("https://site/profile")    # the login's cookie goes with it
+#
+# The connection to the last server stays open for the next request to it, and a server that
+# closed it meanwhile gets the request again on a new one. Cookies a server sets go back to
+# that host only (not to the other hosts of its domain, which a `Domain` would allow: no
+# cookie ever reaches another site), on the paths they name, over HTTPS only when `Secure`,
+# until they expire; they live as long as the session and are never written anywhere.
+manual struct Session:
+    # The open connection, at most one, kept in a vector so it can be taken out of the session.
+    priv conns: vector[File]
+    # "https://example.com:443": where it goes.
+    priv conn_to: str
+    priv cookies: vector[Cookie]
+    # `http.get` and `http.post` use a session for one request: it keeps no connection.
+    priv single: bool
+
+    # The answer to a GET of `address`, as `http.get` gives one.
+    method get(&mut self, address: &str, timeout: f64 = 10.0, redirects: i64 = 5, limit: size = 52428800, verify: bool = True) -> Response raises HttpError:
+        const empty: vector[u8] = []
+        return check request(self, "GET", address, &empty, "", timeout, redirects, limit, verify)
+
+    # The answer to a POST of `body` to `address`, as `http.post` gives one.
+    method post(&mut self, address: &str, body: &vector[u8], content_type: &str = "application/x-www-form-urlencoded", timeout: f64 = 10.0, redirects: i64 = 5, limit: size = 52428800, verify: bool = True) -> Response raises HttpError:
+        return check request(self, "POST", address, body, content_type, timeout, redirects, limit, verify)
+
+    # Closes the connection kept open, now rather than when the session ends; cookies stay.
+    method close(&mut self):
+        self.conns.clear()
+        self.conn_to = ""
+
+    # Sets a cookie, sent to `host` on every path: one found elsewhere, to go on with its session.
+    method set_cookie(&mut self, host: &str, name: &str, value: &str):
+        const kept: Cookie = Cookie(host=host.lower(), name=name.copy(), value=value.copy(), path="/", secure=False, expires=None)
+        store(self, kept)
+
+    # The value of the cookie `name` that `host` set or was given; `None` if there is none, or
+    # if it expired.
+    method cookie(&self, host: &str, name: &str) -> Optional[str]:
+        const wanted: str = host.lower()
+        const now: f64 = time.timestamp()
+        for c in &self.cookies:
+            if c.host == wanted and c.name == name and not expired(c, now):
+                return c.value.copy()
+        return None
+
+priv manual fn expired(c: &Cookie, now: f64) -> bool:
+    if c.expires is None:
+        return False
+    return c.expires <= now
+
+# Keeps `cookie` in place of the one of the same host, name and path; an expired one only
+# removes it.
+priv manual fn store(s: &mut Session, owned cookie: Cookie):
+    const now: f64 = time.timestamp()
+    mut kept: vector[Cookie] = []
+    for c in &s.cookies:
+        const same: bool = c.host == cookie.host and c.name == cookie.name and c.path == cookie.path
+        if not same and not expired(c, now):
+            kept.push(c.copy())
+    if not expired(&cookie, now):
+        kept.push(cookie)
+    s.cookies = kept
+
+priv manual fn take_cookies(s: &mut Session, response: &Response, u: &Url):
+    const set: Optional[str] = header(response, "set-cookie")
+    if set is None:
+        return
+    const now: f64 = time.timestamp()
+    for line in set.split("\n"):
+        const cookie: Optional[Cookie] = read_cookie(&line, u, now)
+        if cookie is not None:
+            store(s, cookie)
+
+# The `Cookie` header for a request to `u`: "a=1; b=2", "" when none goes.
+priv manual fn cookie_header(s: &Session, u: &Url) -> str:
+    const now: f64 = time.timestamp()
+    mut path: str = u.path.copy()
+    if byte_len(path) == 0:
+        path = "/"
+    mut out: str = ""
+    for c in &s.cookies:
+        if c.host == u.host and path_matches(&c.path, &path) and (not c.secure or u.scheme == Scheme.Https) and not expired(c, now):
+            if byte_len(out) > 0:
+                out += "; "
+            out += f"{c.name}={c.value}"
+    return out
 
 # --- sending a request -----------------------------------------------------------------------
 
@@ -294,26 +596,59 @@ priv manual fn open(u: &Url, timeout: f64, verify: bool) -> File raises IoError:
         return check net.connect_tls(&u.host, port_of(u), timeout, verify)
     return check net.connect(&u.host, port_of(u), timeout)
 
-# Sends one request to `u`, and reads its answer.
-priv manual fn exchange(verb: &str, u: &Url, body: &vector[u8], content_type: &str, timeout: f64, limit: size, verify: bool) -> Response raises IoError:
-    const conn: File = check open(u, timeout, verify)
-    mut head: str = f"{verb} {target_of(u)} HTTP/1.1\r\nHost: {host_of(u)}\r\nUser-Agent: hesychia-http\r\nAccept: */*\r\nAccept-Encoding: identity\r\nConnection: close\r\n"
+# Writes one request to `conn`.
+priv manual fn send(conn: &File, s: &Session, verb: &str, u: &Url, body: &vector[u8], content_type: &str) raises IoError:
+    mut head: str = f"{verb} {target_of(u)} HTTP/1.1\r\nHost: {host_of(u)}\r\nUser-Agent: hesychia-http\r\nAccept: */*\r\nAccept-Encoding: identity\r\n"
+    if s.single:
+        head += "Connection: close\r\n"
+    const cookies: str = cookie_header(s, u)
+    if byte_len(cookies) > 0:
+        head += f"Cookie: {cookies}\r\n"
     if verb == "POST":
         head += f"Content-Type: {content_type}\r\nContent-Length: {len(body)}\r\n"
     head += "\r\n"
     const bytes: vector[u8] = head.bytes()
-    check io.sys_write(&conn, &bytes)
+    check io.sys_write(conn, &bytes)
     if len(body) > 0:
-        check io.sys_write(&conn, body)
+        check io.sys_write(conn, body)
+
+# Sends one request to `u` and reads its answer: on the session's open connection when it goes
+# to the same place, sent again on a new one if the server had closed it; the connection is
+# kept for the next request when the answer allows it.
+priv manual fn exchange(s: &mut Session, verb: &str, u: &Url, body: &vector[u8], content_type: &str, timeout: f64, limit: size, verify: bool) -> Response raises IoError:
+    const to: str = f"{u.scheme.name()}://{u.host}:{port_of(u)}"
     const address: str = url.to_text(u)
-    return check read_response(&conn, verb, &address, limit)
+    mut conn: Optional[File] = None
+    if s.conn_to == to and len(s.conns) > 0:
+        conn = s.conns.pop()
+    s.conns.clear()
+    s.conn_to = ""
+    if conn is not None:
+        try:
+            check send(&conn, s, verb, u, body, content_type)
+            const (response, reusable): (Response, bool) = check read_response(&conn, verb, &address, limit)
+            if reusable and not s.single:
+                s.conns.push(conn)
+                s.conn_to = to.copy()
+            return response
+        except IoError as e:
+            if e.reason != no_answer() and not e.reason.contains("roken pipe") and not e.reason.contains("reset"):
+                raise e
+    const fresh: File = check open(u, timeout, verify)
+    check send(&fresh, s, verb, u, body, content_type)
+    const (response, reusable): (Response, bool) = check read_response(&fresh, verb, &address, limit)
+    if reusable and not s.single:
+        s.conns.push(fresh)
+        s.conn_to = to
+    return response
 
 priv manual fn is_redirect(n: i64) -> bool:
     return n == 301 or n == 302 or n == 303 or n == 307 or n == 308
 
-# Sends the request, and follows up to `redirects` redirects. A 303, and a 301 or a 302 after
-# a POST, go on as a GET without the body, as browsers do; a 307 or a 308 keep both.
-priv manual fn request(verb: &str, address: &str, body: &vector[u8], content_type: &str, timeout: f64, redirects: i64, limit: size, verify: bool) -> Response raises HttpError:
+# Sends the request, and follows up to `redirects` redirects, the cookies set on the way kept.
+# A 303, and a 301 or a 302 after a POST, go on as a GET without the body, as browsers do; a
+# 307 or a 308 keep both.
+priv manual fn request(s: &mut Session, verb: &str, address: &str, body: &vector[u8], content_type: &str, timeout: f64, redirects: i64, limit: size, verify: bool) -> Response raises HttpError:
     mut current: str = address.copy()
     mut current_verb: str = verb.copy()
     mut sent: vector[u8] = body.copy()
@@ -330,9 +665,10 @@ priv manual fn request(verb: &str, address: &str, body: &vector[u8], content_typ
             raise HttpError(url=current.copy(), reason="the address has no host")
         mut response: Response = Response(status=Status.Ok, headers=dict[str, str](), final_url="", body=[])
         try:
-            response = check exchange(&current_verb, &u, &sent, content_type, timeout, limit, verify)
+            response = check exchange(s, &current_verb, &u, &sent, content_type, timeout, limit, verify)
         except IoError as e:
             raise HttpError(url=current.copy(), reason=e.reason.copy())
+        take_cookies(s, &response, &u)
         const n: i64 = code(&response.status)
         const location: Optional[str] = header(&response, "location")
         if not is_redirect(n) or location is None or redirects <= 0:
@@ -349,15 +685,23 @@ priv manual fn request(verb: &str, address: &str, body: &vector[u8], content_typ
             current_verb = "GET"
             sent = []
 
+priv manual fn single() -> Session:
+    mut s: Session = Session()
+    s.single = True
+    return s
+
 # The answer to a GET of `address`, after up to `redirects` redirects (0 gives the redirect
 # itself). `timeout` limits connecting and each wait for the server, in seconds; a body over
 # `limit` bytes raises, 50 MiB by default. `verify=False` takes any certificate for an
-# `https://` address (see `net.connect_tls`).
+# `https://` address (see `net.connect_tls`). Cookies set by redirects on the way are sent
+# along the rest of them; for more requests sharing cookies and a connection, see `Session`.
 manual fn get(address: &str, timeout: f64 = 10.0, redirects: i64 = 5, limit: size = 52428800, verify: bool = True) -> Response raises HttpError:
+    mut s: Session = single()
     const empty: vector[u8] = []
-    return check request("GET", address, &empty, "", timeout, redirects, limit, verify)
+    return check request(&mut s, "GET", address, &empty, "", timeout, redirects, limit, verify)
 
 # The answer to a POST of `body` to `address`, as `get` gives one. `content_type` says what
 # the body is: a form, by default, as `"q=" + url.encode(term)` builds one.
 manual fn post(address: &str, body: &vector[u8], content_type: &str = "application/x-www-form-urlencoded", timeout: f64 = 10.0, redirects: i64 = 5, limit: size = 52428800, verify: bool = True) -> Response raises HttpError:
-    return check request("POST", address, body, content_type, timeout, redirects, limit, verify)
+    mut s: Session = single()
+    return check request(&mut s, "POST", address, body, content_type, timeout, redirects, limit, verify)
