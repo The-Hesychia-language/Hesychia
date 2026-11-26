@@ -199,7 +199,8 @@ struct CFlags<'a> {
     threads: bool,
     /// Sockets are used: on Windows they are in their own library.
     net: bool,
-    /// TLS connections are made: OpenSSL is linked, and on Windows the system's certificate API.
+    /// TLS connections are made: OpenSSL is linked, and on Windows the system's certificate and
+    /// random-number libraries it uses.
     tls: bool,
     /// `[settings] links`, after the code that uses them.
     links: &'a [String],
@@ -221,7 +222,7 @@ fn run_c_compiler(
         .args(flags.threads.then_some("-pthread"))
         .args(flags.links.iter().map(|name| format!("-l{name}")))
         .args(if flags.tls { &["-lssl", "-lcrypto"][..] } else { &[] })
-        .args((flags.tls && platform.os == "windows").then_some("-lcrypt32"))
+        .args(if flags.tls && platform.os == "windows" { &["-lcrypt32", "-lbcrypt"][..] } else { &[] })
         .args((flags.net && platform.os == "windows").then_some("-lws2_32"))
         .arg("-lm")
         .status()
