@@ -6,8 +6,9 @@ from io import File
 from net import Listener, Certificate
 
 # Answers each client with one line, `count` times; a client that fails the handshake is
-# reported and the next one is waited for.
-manual fn serve(owned listener: Listener, count: i64):
+# counted and the next one is waited for. Gives how many failed.
+manual fn serve(owned listener: Listener, count: i64) -> i64:
+    mut failed: i64 = 0
     for _ in range(count):
         try:
             const conn: File = check net.accept(&listener)
@@ -15,7 +16,9 @@ manual fn serve(owned listener: Listener, count: i64):
             if line is not None:
                 print(f"secret {line}", to=conn)
         except IoError as e:
-            print(f"server: {e.reason.starts_with("TLS handshake failed")}")
+            if e.reason.starts_with("TLS handshake failed"):
+                failed += 1
+    return failed
 
 managed fn ask(port: i32, verify: bool, ca: Optional[Certificate]):
     try:
@@ -40,7 +43,7 @@ managed fn main():
     ask(47250, True, ca)
     ask(47250, True, other_ca)
     ask(47250, False, None)
-    t.join()
+    print(f"server: {t.join()} failed")
 
     quick = net.certificate("localhost")
     plain = net.listen_tls("127.0.0.1", 47251, quick, timeout=5.0)
@@ -64,8 +67,8 @@ managed fn main():
 # expect: pem
 # expect: secret hello
 # expect: client: certificate rejected: unable to get local issuer certificate
-# expect: server: True
 # expect: secret hello
+# expect: server: 1 failed
 # expect: secret hello
 # expect: the signer is not an authority: make it with authority=True
 # expect: the key does not go with the certificate

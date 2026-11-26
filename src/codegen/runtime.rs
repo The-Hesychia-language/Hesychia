@@ -1446,17 +1446,23 @@ uint8_t* hsy_tls_certificate(const char* name, const char* names, const char* si
         }
     }
     X509_set_version(x, 2);
-    if (BN_rand(serial, 127, BN_RAND_TOP_ANY, BN_RAND_BOTTOM_ANY) != 1 ||
-        !BN_to_ASN1_INTEGER(serial, X509_get_serialNumber(x)))
-        goto done;
+    if (BN_rand(serial, 127, BN_RAND_TOP_ANY, BN_RAND_BOTTOM_ANY) != 1) goto done;
+    ASN1_INTEGER* number = BN_to_ASN1_INTEGER(serial, NULL);
+    bool numbered = number && X509_set_serialNumber(x, number) == 1;
+    ASN1_INTEGER_free(number);
+    if (!numbered) goto done;
     /* A few minutes back, for clocks that are a little behind. */
     X509_gmtime_adj(X509_getm_notBefore(x), -300);
     X509_gmtime_adj(X509_getm_notAfter(x), (long)days * 86400);
     X509_set_pubkey(x, key);
-    X509_NAME* subject = X509_get_subject_name(x);
-    if (X509_NAME_add_entry_by_txt(subject, "CN", MBSTRING_UTF8, (const unsigned char*)name, -1, -1, 0) != 1)
-        goto done;
-    X509_set_issuer_name(x, issuer ? X509_get_subject_name(issuer) : subject);
+    /* Built apart and set: OpenSSL 4 gives a certificate's own name as const. */
+    X509_NAME* subject = X509_NAME_new();
+    bool named = subject &&
+                 X509_NAME_add_entry_by_txt(subject, "CN", MBSTRING_UTF8, (const unsigned char*)name, -1, -1, 0) == 1 &&
+                 X509_set_subject_name(x, subject) == 1 &&
+                 X509_set_issuer_name(x, issuer ? X509_get_subject_name(issuer) : subject) == 1;
+    X509_NAME_free(subject);
+    if (!named) goto done;
     X509* signing = issuer ? issuer : x;
     bool ok = hsy_tls_extend(x, signing, NID_subject_key_identifier, "hash") &&
               hsy_tls_extend(x, signing, NID_authority_key_identifier, "keyid:always");
