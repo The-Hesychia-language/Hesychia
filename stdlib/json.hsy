@@ -19,13 +19,28 @@ priv manual fn text_of(bytes: &vector[u8]) -> str:
         panic("json: not UTF-8 text")
     return text
 
-# Text that is not well-formed JSON, and where it goes wrong, in bytes.
+# Text that is not well-formed JSON, or a value that does not fit a struct. `line` and
+# `column` say where the text goes wrong, counted from 1 in characters; both are 0 when it
+# is the value that does not fit, and `reason` then starts with where: "users[2].age: ...".
 manual struct JsonError:
-    at: size
+    line: size
+    column: size
     reason: str
 
-priv manual fn error(at: size, reason: &str) -> JsonError:
-    return JsonError(at=at, reason=f"{reason}")
+# The error at the byte `at` of `text`.
+priv manual fn error(text: &str, at: size, reason: &str) -> JsonError:
+    mut line: size = 1
+    mut column: size = 1
+    for i in range(at):
+        if i >= byte_len(text):
+            break
+        const b: u8 = text.byte(i)
+        if b == 10:
+            line += 1
+            column = 1
+        elif (b & 192) != 128:
+            column += 1
+    return JsonError(line=line, column=column, reason=f"{reason}")
 
 priv manual fn skip_space(text: &str, at: &mut size):
     while at < byte_len(text) and (text.byte(at) == 32 or text.byte(at) == 9 or text.byte(at) == 10 or text.byte(at) == 13):
@@ -34,7 +49,7 @@ priv manual fn skip_space(text: &str, at: &mut size):
 priv manual fn expect_word(text: &str, at: &mut size, word: &str) raises JsonError:
     for i in range(byte_len(word)):
         if at + i >= byte_len(text) or text.byte(at + i) != word.byte(i):
-            raise error(at, f"expected `{word}`")
+            raise error(text, at, f"expected `{word}`")
     at += byte_len(word)
 
 priv manual fn hex_digit(b: u8) -> Optional[u32]:
@@ -51,10 +66,10 @@ priv manual fn code_unit(text: &str, at: &mut size) -> u32 raises JsonError:
     mut value: u32 = 0
     for _ in range(4):
         if at >= byte_len(text):
-            raise error(at, "a `\\u` escape needs four hex digits")
+            raise error(text, at, "a `\\u` escape needs four hex digits")
         const digit: Optional[u32] = hex_digit(text.byte(at))
         if digit is None:
-            raise error(at, "a `\\u` escape needs four hex digits")
+            raise error(text, at, "a `\\u` escape needs four hex digits")
         value = value * 16 + digit
         at += 1
     return value
@@ -82,14 +97,14 @@ priv manual fn read_text(text: &str, at: &mut size) -> str raises JsonError:
     while at < byte_len(text) and text.byte(at) != 34:
         const b: u8 = text.byte(at)
         if b < 32:
-            raise error(at, "a control character inside a string")
+            raise error(text, at, "a control character inside a string")
         if b != 92:
             out.push(b)
             at += 1
         else:
             at += 1
             if at >= byte_len(text):
-                raise error(at, "a string is not closed")
+                raise error(text, at, "a string is not closed")
             const escape: u8 = text.byte(at)
             at += 1
             if escape == 34 or escape == 92 or escape == 47:
@@ -111,15 +126,15 @@ priv manual fn read_text(text: &str, at: &mut size) -> str raises JsonError:
                     check expect_word(text, at, "\\u")
                     const low: u32 = check code_unit(text, at)
                     if low < 56320 or low >= 57344:
-                        raise error(at, "a lone surrogate in a `\\u` escape")
+                        raise error(text, at, "a lone surrogate in a `\\u` escape")
                     code = 65536 + ((code - 55296) << 10) + (low - 56320)
                 elif code >= 56320 and code < 57344:
-                    raise error(at, "a lone surrogate in a `\\u` escape")
+                    raise error(text, at, "a lone surrogate in a `\\u` escape")
                 push_utf8(&mut out, code)
             else:
-                raise error(at - 1, "an unknown escape")
+                raise error(text, at - 1, "an unknown escape")
     if at >= byte_len(text):
-        raise error(at, "a string is not closed")
+        raise error(text, at, "a string is not closed")
     at += 1
     return text_of(&out)
 
@@ -132,7 +147,7 @@ priv manual fn read_number(text: &str, at: &mut size) -> f64 raises JsonError:
     if at < n and text.byte(at) == 45:
         at += 1
     if at >= n or not is_digit(text.byte(at)):
-        raise error(start, "expected a value")
+        raise error(text, start, "expected a value")
     if text.byte(at) == 48:
         at += 1
     else:
@@ -141,7 +156,7 @@ priv manual fn read_number(text: &str, at: &mut size) -> f64 raises JsonError:
     if at < n and text.byte(at) == 46:
         at += 1
         if at >= n or not is_digit(text.byte(at)):
-            raise error(at, "expected digits after the point")
+            raise error(text, at, "expected digits after the point")
         while at < n and is_digit(text.byte(at)):
             at += 1
     if at < n and (text.byte(at) == 101 or text.byte(at) == 69):
@@ -149,21 +164,21 @@ priv manual fn read_number(text: &str, at: &mut size) -> f64 raises JsonError:
         if at < n and (text.byte(at) == 43 or text.byte(at) == 45):
             at += 1
         if at >= n or not is_digit(text.byte(at)):
-            raise error(at, "expected digits in the exponent")
+            raise error(text, at, "expected digits in the exponent")
         while at < n and is_digit(text.byte(at)):
             at += 1
     const digits: str = text[start:at]
     try:
         return check f64(digits)
     except ParseError as _e:
-        raise error(start, "not a number")
+        raise error(text, start, "not a number")
 
 priv manual fn read_value(text: &str, at: &mut size, depth: size) -> Value raises JsonError:
     if depth > 512:
-        raise error(at, "values nested too deeply")
+        raise error(text, at, "values nested too deeply")
     skip_space(text, at)
     if at >= byte_len(text):
-        raise error(at, "expected a value")
+        raise error(text, at, "expected a value")
     const b: u8 = text.byte(at)
     if b == 110:
         check expect_word(text, at, "null")
@@ -193,7 +208,7 @@ priv manual fn read_value(text: &str, at: &mut size, depth: size) -> Value raise
                 at += 1
                 more = False
             else:
-                raise error(at, "expected `,` or `]`")
+                raise error(text, at, "expected `,` or `]`")
         return Value.List(items)
     if b == 123:
         at += 1
@@ -206,11 +221,11 @@ priv manual fn read_value(text: &str, at: &mut size, depth: size) -> Value raise
         while more:
             skip_space(text, at)
             if at >= byte_len(text) or text.byte(at) != 34:
-                raise error(at, "expected a key in quotes")
+                raise error(text, at, "expected a key in quotes")
             const key: str = check read_text(text, at)
             skip_space(text, at)
             if at >= byte_len(text) or text.byte(at) != 58:
-                raise error(at, "expected `:`")
+                raise error(text, at, "expected `:`")
             at += 1
             fields[key] = check read_value(text, at, depth + 1)
             skip_space(text, at)
@@ -220,7 +235,7 @@ priv manual fn read_value(text: &str, at: &mut size, depth: size) -> Value raise
                 at += 1
                 more = False
             else:
-                raise error(at, "expected `,` or `}`")
+                raise error(text, at, "expected `,` or `}`")
         return Value.Object(fields)
     return Value.Number(check read_number(text, at))
 
@@ -230,7 +245,7 @@ manual fn parse(text: &str) -> Value raises JsonError:
     const value: Value = check read_value(text, &mut at, 0)
     skip_space(text, &mut at)
     if at != byte_len(text):
-        raise error(at, "text after the value")
+        raise error(text, at, "text after the value")
     return value
 
 priv manual fn dump_text(out: &mut str, text: &str):
@@ -326,10 +341,10 @@ priv comptime fn is_int(T: type) -> bool:
 # What a value of the wrong kind raises. Its reason starts with where it is, which each
 # level adds in front as the error goes up: ".address.zip: expected a text".
 priv manual fn refused(reason: &str) -> JsonError:
-    return JsonError(at=0, reason=f": {reason}")
+    return JsonError(line=0, column=0, reason=f": {reason}")
 
 priv manual fn within(e: &JsonError, part: &str) -> JsonError:
-    return JsonError(at=e.at, reason=f"{part}{e.reason}")
+    return JsonError(line=e.line, column=e.column, reason=f"{part}{e.reason}")
 
 priv manual fn is_optional[T](_slot: &T) -> bool:
     comptime if T == Optional:
@@ -421,7 +436,7 @@ priv manual fn fill[T](out: &mut T, value: &Value) raises JsonError:
                         except JsonError as e:
                             raise within(&e, f".{f.name}")
                     elif not is_optional(&field(out, f)):
-                        raise JsonError(at=0, reason=f".{f.name}: missing")
+                        raise JsonError(line=0, column=0, reason=f".{f.name}: missing")
             case _:
                 raise refused("expected an object")
     else:
@@ -438,9 +453,9 @@ manual fn to_struct[T](text: &str) -> T raises JsonError:
     except JsonError as e:
         # The reason starts with ".name" or ": ": the mark in front goes.
         if e.reason.starts_with(": "):
-            raise JsonError(at=e.at, reason=e.reason[2:])
+            raise JsonError(line=e.line, column=e.column, reason=e.reason[2:])
         if e.reason.starts_with("."):
-            raise JsonError(at=e.at, reason=e.reason[1:])
+            raise JsonError(line=e.line, column=e.column, reason=e.reason[1:])
         raise e
     return out
 
@@ -449,7 +464,7 @@ manual fn to_struct[T](text: &str) -> T raises JsonError:
 manual fn load[T = Value](f: &File) -> T raises JsonError | IoError:
     const text: Optional[str] = check io.read(f, end="")
     if text is None:
-        raise error(0, "expected a value")
+        raise JsonError(line=1, column=1, reason="expected a value")
     comptime if T == Value:
         return check parse(&text)
     else:

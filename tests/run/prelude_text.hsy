@@ -17,16 +17,16 @@ managed fn main():
     try:
         print(f"{i32("12x")}")
     except ParseError as e:
-        print(f"bad {e.text}")
+        print(f"bad {e.text}: {e.reason}")
     try:
         print(f"{u8("256")}")
     except ParseError as e:
-        print(f"bad {e.text}")
+        print(f"bad {e.text}: {e.reason}")
 # expect: [Héllo, wörld] [Héllo, wörld  ] [  Héllo, wörld] HÉLLO, WÖRLD héllo, wörld
 # expect: 7 éll Hé wörld True HéLLo, wörLd
 # expect: 4 ['a', 'b', '', 'c']
 # expect: 3 ['one', 'two', 'three']
 # expect: x-y-z
 # expect: -41 25.0 255 -128 3.5 [1, 2]
-# expect: bad 12x
-# expect: bad 256
+# expect: bad 12x: not a whole number
+# expect: bad 256: too large for `u8`

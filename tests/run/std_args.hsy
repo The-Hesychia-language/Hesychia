@@ -83,13 +83,13 @@ managed fn main():
 # expect: --a -b 3 False None False
 # expect: error: <target> is missing
 # expect: error: unexpected `c`
-# expect: error: --retries: `many` is not a whole number
+# expect: error: --retries: `many`: not a whole number
 # expect: error: `--retries` needs a value
 # expect: error: unknown option `--color`
 # expect: error: `--verbose` takes no value
 # expect: error: unknown option `-v`
 # expect: [1, -2, 30] 9 0.5
-# expect: error: --limit: `300` is too large
+# expect: error: --limit: `300`: too large
 # expect: build False 4
 # expect: build True 8
 # expect: run main.hsy True
