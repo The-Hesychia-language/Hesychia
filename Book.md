@@ -1115,6 +1115,8 @@ import url
 
 u = url.parse("https://a.com:8080/p?q=1")
 print(f"{u.host} {u.port}")
+if u.scheme == url.Scheme.Https:
+    print("secure")
 ```
 
 ### `html`
