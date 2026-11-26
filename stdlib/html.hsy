@@ -1,0 +1,429 @@
+# html: reads a page tag by tag, and the text between its tags.
+#
+#     for tag in html.tags(response.body):
+#         if tag.name == "a":
+#             href = html.attribute(tag, "href")
+#
+# A page comes in as bytes, as it comes from a file or a server, and is read whatever its
+# encoding: tags are ASCII. What comes out is `str`; a byte that is not UTF-8 there is `U+FFFD`.
+# Addresses are given as written in the page, often relative: `url.join` resolves them.
+
+# A start tag: `<img src="a.png" alt=x>`. The name and the attribute names are in lowercase,
+# and the values are unescaped (`&amp;` is `&`). An attribute written twice keeps its first
+# value, as browsers do; one written without a value, as `<input disabled>`, has "".
+manual struct Tag:
+    name: str
+    attributes: dict[str, str]
+
+# --- bytes -----------------------------------------------------------------------------------
+
+priv manual fn lower_byte(b: u8) -> u8:
+    if b >= 65 and b <= 90:
+        return b + 32
+    return b
+
+priv manual fn is_space(b: u8) -> bool:
+    return b == 32 or (b >= 9 and b <= 13)
+
+priv manual fn is_letter(b: u8) -> bool:
+    return (b >= 97 and b <= 122) or (b >= 65 and b <= 90)
+
+priv manual fn is_name_byte(b: u8) -> bool:
+    return is_letter(b) or (b >= 48 and b <= 57) or b == 45 or b == 58 or b == 95
+
+priv manual fn hex_value(b: u8) -> i64:
+    if b >= 48 and b <= 57:
+        return i64(b) - 48
+    if b >= 97 and b <= 102:
+        return i64(b) - 87
+    if b >= 65 and b <= 70:
+        return i64(b) - 55
+    return -1
+
+# Whether `word` (lowercase) is in `page` at `at`, in any case.
+priv manual fn at_word(page: &vector[u8], at: size, word: &str) -> bool:
+    if at > len(page) or byte_len(word) > len(page) - at:
+        return False
+    for k in range(byte_len(word)):
+        if lower_byte(page[at + k]) != word.byte(k):
+            return False
+    return True
+
+# Where `word` next is in `page` from `at`, in any case; the end of the page if it is not there.
+priv manual fn find_word(page: &vector[u8], at: size, word: &str) -> size:
+    mut i: size = at
+    while i < len(page):
+        if at_word(page, i, word):
+            return i
+        i += 1
+    return len(page)
+
+priv manual fn push_utf8(out: &mut vector[u8], code: i64):
+    if code < 128:
+        out.push(u8(code))
+    elif code < 2048:
+        out.push(u8(192 + code // 64))
+        out.push(u8(128 + code % 64))
+    elif code < 65536:
+        out.push(u8(224 + code // 4096))
+        out.push(u8(128 + (code // 64) % 64))
+        out.push(u8(128 + code % 64))
+    else:
+        out.push(u8(240 + code // 262144))
+        out.push(u8(128 + (code // 4096) % 64))
+        out.push(u8(128 + (code // 64) % 64))
+        out.push(u8(128 + code % 64))
+
+# How many bytes the UTF-8 character at `at` takes, or 0 if the bytes there are not one.
+priv manual fn utf8_len(bytes: &vector[u8], at: size) -> size:
+    const b: u8 = bytes[at]
+    if b < 128:
+        return 1
+    mut n: size = 0
+    mut low: u8 = 128
+    mut high: u8 = 191
+    if b >= 194 and b <= 223:
+        n = 2
+    elif b >= 224 and b <= 239:
+        n = 3
+        if b == 224:
+            low = 160
+        elif b == 237:
+            high = 159
+    elif b >= 240 and b <= 244:
+        n = 4
+        if b == 240:
+            low = 144
+        elif b == 244:
+            high = 143
+    else:
+        return 0
+    if n > len(bytes) - at:
+        return 0
+    for k in range(1, n):
+        const c: u8 = bytes[at + k]
+        if (k == 1 and (c < low or c > high)) or c < 128 or c > 191:
+            return 0
+    return n
+
+# `bytes` as text, each byte that is not part of a UTF-8 character as `U+FFFD`.
+priv manual fn text_of(bytes: &vector[u8]) -> str:
+    const valid: Optional[str] = str.from_bytes(bytes)
+    if valid is not None:
+        return valid
+    mut out: vector[u8] = []
+    mut i: size = 0
+    while i < len(bytes):
+        const n: size = utf8_len(bytes, i)
+        if n == 0:
+            push_utf8(&mut out, 65533)
+            i += 1
+        else:
+            for k in range(n):
+                out.push(bytes[i + k])
+            i += n
+    const shown: Optional[str] = str.from_bytes(&out)
+    if shown is None:
+        return ""
+    return shown
+
+# --- character references --------------------------------------------------------------------
+
+# The character a numeric reference names, from after `&#` to its `;`; -1 if it names none.
+# 0, surrogates and codes past Unicode are U+FFFD, as browsers read them.
+priv manual fn numeric_code(page: &vector[u8], start: size, semi: size) -> i64:
+    mut k: size = start
+    mut base: i64 = 10
+    if k < semi and lower_byte(page[k]) == 120:
+        base = 16
+        k += 1
+    if k == semi:
+        return -1
+    mut code: i64 = 0
+    while k < semi:
+        const digit: i64 = hex_value(page[k])
+        if digit < 0 or digit >= base:
+            return -1
+        if code <= 1114111:
+            code = code * base + digit
+        k += 1
+    if code == 0 or code > 1114111 or (code >= 55296 and code <= 57343):
+        return 65533
+    return code
+
+priv manual fn named_code(page: &vector[u8], at: size) -> i64:
+    if at_word(page, at, "&amp;"):
+        return 38
+    if at_word(page, at, "&lt;"):
+        return 60
+    if at_word(page, at, "&gt;"):
+        return 62
+    if at_word(page, at, "&quot;"):
+        return 34
+    if at_word(page, at, "&apos;"):
+        return 39
+    if at_word(page, at, "&nbsp;"):
+        return 160
+    return -1
+
+# The bytes of `page` from `start` to `end`, with `&amp;`, `&#47;`, `&#x2F;`... as the
+# characters they stand for. A `&` that starts no known reference stays as written.
+priv manual fn unescaped(page: &vector[u8], start: size, end: size) -> vector[u8]:
+    mut out: vector[u8] = []
+    mut i: size = start
+    while i < end:
+        const b: u8 = page[i]
+        if b != 38:
+            out.push(b)
+            i += 1
+            continue
+        mut semi: size = i + 1
+        while semi < end and semi < i + 12 and page[semi] != 59:
+            semi += 1
+        mut code: i64 = -1
+        if semi < end and page[semi] == 59:
+            if i + 1 < semi and page[i + 1] == 35:
+                code = numeric_code(page, i + 2, semi)
+            else:
+                code = named_code(page, i)
+        if code < 0:
+            out.push(b)
+            i += 1
+        else:
+            push_utf8(&mut out, code)
+            i = semi + 1
+    return out
+
+# `text` with each character reference as the character it stands for:
+# `html.unescape("a &amp; b")` is "a & b".
+manual fn unescape(text: &vector[u8]) -> str:
+    const out: vector[u8] = unescaped(text, 0, len(text))
+    return text_of(&out)
+
+# `text` made safe to put in a page, as text or as a quoted attribute value: `& < > " '`
+# become `&amp; &lt; &gt; &quot; &#39;`.
+manual fn escape(text: &vector[u8]) -> str:
+    mut out: vector[u8] = []
+    for b in text:
+        if b == 38:
+            out.extend("&amp;".bytes())
+        elif b == 60:
+            out.extend("&lt;".bytes())
+        elif b == 62:
+            out.extend("&gt;".bytes())
+        elif b == 34:
+            out.extend("&quot;".bytes())
+        elif b == 39:
+            out.extend("&#39;".bytes())
+        else:
+            out.push(b)
+    return text_of(&out)
+
+# --- tags ------------------------------------------------------------------------------------
+
+# Tags whose content is text, not tags: `<script>if (a<b)...</script>`.
+priv manual fn holds_text(name: &str) -> bool:
+    return name == "script" or name == "style" or name == "textarea" or name == "title"
+
+# Reads the tag whose name starts at `at`, and moves `at` past it.
+priv manual fn read_tag(page: &vector[u8], at: &mut size) -> Tag:
+    mut i: size = at
+    mut name: vector[u8] = []
+    while i < len(page) and is_name_byte(page[i]):
+        name.push(lower_byte(page[i]))
+        i += 1
+    mut tag: Tag = Tag(name=text_of(&name), attributes=dict[str, str]())
+    while i < len(page) and page[i] != 62:
+        if is_space(page[i]) or page[i] == 47:
+            i += 1
+            continue
+        mut key: vector[u8] = []
+        while i < len(page) and not is_space(page[i]) and page[i] != 61 and page[i] != 62 and page[i] != 47:
+            key.push(lower_byte(page[i]))
+            i += 1
+        while i < len(page) and is_space(page[i]):
+            i += 1
+        mut value: vector[u8] = []
+        if i < len(page) and page[i] == 61:
+            i += 1
+            while i < len(page) and is_space(page[i]):
+                i += 1
+            if i < len(page) and (page[i] == 34 or page[i] == 39):
+                const quote: u8 = page[i]
+                const start: size = i + 1
+                i = start
+                while i < len(page) and page[i] != quote:
+                    i += 1
+                value = unescaped(page, start, i)
+                if i < len(page):
+                    i += 1
+            else:
+                const start: size = i
+                while i < len(page) and not is_space(page[i]) and page[i] != 62:
+                    i += 1
+                value = unescaped(page, start, i)
+        if len(key) == 0:
+            i += 1
+            continue
+        const key_text: str = text_of(&key)
+        if key_text not in tag.attributes:
+            tag.attributes[key_text] = text_of(&value)
+    if i < len(page):
+        i += 1
+    at = i
+    return tag
+
+# Where the page goes on after the markup at `at` that is not a start tag: a comment,
+# `<!DOCTYPE ...>`, `<?xml ...?>` or a closing tag `</p>`; `at` itself if it is none of these.
+priv manual fn skip_markup(page: &vector[u8], at: size) -> size:
+    if at_word(page, at, "<!--"):
+        const close: size = find_word(page, at + 4, "-->")
+        if close == len(page):
+            return close
+        return close + 3
+    if at + 1 < len(page) and (page[at + 1] == 33 or page[at + 1] == 63 or page[at + 1] == 47):
+        mut i: size = at
+        while i < len(page) and page[i] != 62:
+            i += 1
+        if i < len(page):
+            i += 1
+        return i
+    return at
+
+priv manual fn starts_tag(page: &vector[u8], at: size) -> bool:
+    return page[at] == 60 and at + 1 < len(page) and is_letter(page[at + 1])
+
+# Every start tag of `page`, in the order they come. Comments, closing tags and the content
+# of `script`, `style`, `textarea` and `title` give none.
+manual fn tags(page: &vector[u8]) -> vector[Tag]:
+    mut found: vector[Tag] = []
+    mut i: size = 0
+    while i < len(page):
+        if page[i] != 60:
+            i += 1
+            continue
+        const after: size = skip_markup(page, i)
+        if after != i:
+            i = after
+        elif starts_tag(page, i):
+            i += 1
+            const tag: Tag = read_tag(page, &mut i)
+            if holds_text(&tag.name):
+                i = find_word(page, i, f"</{tag.name}")
+            found.push(tag)
+        else:
+            i += 1
+    return found
+
+# The value of the attribute `name` of `tag`, in any case; `None` if the tag does not have it.
+manual fn attribute(tag: &Tag, name: &str) -> Optional[str]:
+    const key: str = name.lower()
+    return tag.attributes.get(&key)
+
+# The addresses of the `srcset` of `tag`: "a.png 1x, b.png 2x" gives "a.png" and "b.png".
+# An address may hold commas (`data:` addresses do); its descriptors are skipped.
+manual fn srcset(tag: &Tag) -> vector[str]:
+    mut found: vector[str] = []
+    const value: Optional[str] = attribute(tag, "srcset")
+    if value is None:
+        return found
+    const text: vector[u8] = value.bytes()
+    mut i: size = 0
+    while i < len(text):
+        while i < len(text) and (is_space(text[i]) or text[i] == 44):
+            i += 1
+        mut address: vector[u8] = []
+        while i < len(text) and not is_space(text[i]):
+            address.push(text[i])
+            i += 1
+        mut described: bool = True
+        while len(address) > 0 and address[len(address) - 1] == 44:
+            address.pop()
+            described = False
+        if described:
+            mut depth: size = 0
+            while i < len(text) and (text[i] != 44 or depth > 0):
+                if text[i] == 40:
+                    depth += 1
+                elif text[i] == 41 and depth > 0:
+                    depth -= 1
+                i += 1
+        if len(address) > 0:
+            found.push(text_of(&address))
+    return found
+
+# --- text ------------------------------------------------------------------------------------
+
+# Tags after which the text of a page goes on on a new line.
+priv manual fn breaks_line(name: &str) -> bool:
+    for block in ["br", "p", "div", "li", "ul", "ol", "tr", "table", "h1", "h2", "h3", "h4", "h5", "h6", "section", "article", "header", "footer", "nav", "main", "aside", "blockquote", "pre", "hr", "title", "dt", "dd", "form"]:
+        if name == block:
+            return True
+    return False
+
+# The visible text of a page, built a piece at a time: spaces gathered, one line break at most.
+priv manual struct Writer:
+    out: vector[u8]
+    space: bool
+    line_start: bool
+
+priv manual fn write_byte(w: &mut Writer, b: u8):
+    if is_space(b):
+        w.space = True
+        return
+    if w.space and not w.line_start:
+        w.out.push(32)
+    w.out.push(b)
+    w.space = False
+    w.line_start = False
+
+priv manual fn write_text(w: &mut Writer, bytes: &vector[u8]):
+    for b in bytes:
+        write_byte(w, b)
+
+priv manual fn write_break(w: &mut Writer):
+    if not w.line_start:
+        w.out.push(10)
+    w.line_start = True
+    w.space = False
+
+# The text a reader sees in `page`: tags removed, references unescaped, spaces and line breaks
+# gathered into one, a new line after a paragraph, a heading, a list item... The content of
+# `script`, `style` and `template` is left out.
+manual fn text(page: &vector[u8]) -> str:
+    mut w: Writer = Writer(out=[], space=False, line_start=True)
+    mut i: size = 0
+    while i < len(page):
+        if page[i] != 60:
+            mut end: size = i
+            while end < len(page) and page[end] != 60:
+                end += 1
+            const piece: vector[u8] = unescaped(page, i, end)
+            write_text(&mut w, &piece)
+            i = end
+            continue
+        const after: size = skip_markup(page, i)
+        if after != i:
+            if page[i + 1] == 47:
+                mut name: vector[u8] = []
+                mut k: size = i + 2
+                while k < len(page) and is_name_byte(page[k]):
+                    name.push(lower_byte(page[k]))
+                    k += 1
+                const closed: str = text_of(&name)
+                if breaks_line(&closed):
+                    write_break(&mut w)
+            i = after
+        elif starts_tag(page, i):
+            i += 1
+            const tag: Tag = read_tag(page, &mut i)
+            if tag.name == "script" or tag.name == "style" or tag.name == "template":
+                i = find_word(page, i, f"</{tag.name}")
+            elif breaks_line(&tag.name):
+                write_break(&mut w)
+        else:
+            write_byte(&mut w, 60)
+            i += 1
+    while len(w.out) > 0 and w.out[len(w.out) - 1] == 10:
+        w.out.pop()
+    return text_of(&w.out)

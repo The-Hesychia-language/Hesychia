@@ -1,0 +1,96 @@
+from io import print
+import html
+
+managed fn main():
+    lines = [
+        "<!DOCTYPE html><html><head><title>A &lt;b&gt; page</title>",
+        "<style>a > b { color: red }</style>",
+        "<script>if (a<b) { document.write('<img src=no.png>') }</script></head>",
+        "<body><!-- <a href=hidden> -->",
+        "<h1>Hello <i>world</i></h1>",
+        "<p>Tea &amp; cakes,   <b>fresh</b>",
+        "today.</p>",
+        "<IMG SRC='/img/a.png' alt=\"x &quot;y&quot;\" src=second.png>",
+        "<img data-src=lazy.png srcset=\"b.png 1x, c.png 2x,data:image/png;base64,AA== 3x, d.png\">",
+        "<a href=\"/about?a=1&amp;b=2\" hidden>About</a><a>No link</a>",
+        "<ul><li>one</li><li>two &#x2F; &#233; &#0; &bogus;</li></ul>",
+        "</body></html>"
+    ]
+    page = "\n".join(lines).bytes()
+
+    for tag in html.tags(page):
+        print(f"{tag.name} {len(tag.attributes)}")
+        src = html.attribute(tag, "SRC")
+        if src is not None:
+            print(f"  src {src}")
+        href = html.attribute(tag, "href")
+        if href is not None:
+            print(f"  href {href}")
+        alt = html.attribute(tag, "alt")
+        if alt is not None:
+            print(f"  alt {alt}")
+        hidden = html.attribute(tag, "hidden")
+        if hidden is not None:
+            print(f"  hidden [{hidden}]")
+        for address in html.srcset(tag):
+            print(f"  srcset {address}")
+
+    print("--")
+    print(html.text(page))
+    print("--")
+    print(html.unescape("a &amp; b &#60;&#x3e; &AMP; & alone &#; &#xZZ;".bytes()))
+    print(html.escape("<a href=\"x\">Tom & Jerry's</a>".bytes()))
+    print(html.unescape(html.escape("<&>".bytes()).bytes()))
+
+    broken = [u8(60), u8(97), u8(32), u8(104), u8(114), u8(101), u8(102), u8(61), u8(255), u8(62), u8(104), u8(233), u8(60), u8(47), u8(97), u8(62)]
+    for tag in html.tags(broken):
+        href = html.attribute(tag, "href")
+        if href is not None:
+            print(f"{tag.name} {href}")
+    print(html.text(broken))
+    cut = html.tags("<a".bytes())
+    print(f"{len(cut)}")
+    unclosed = html.tags("<!-- never closed <a href=x>".bytes())
+    print(f"{len(unclosed)}")
+    print(html.text("1 < 2 and <3".bytes()))
+# expect: html 0
+# expect: head 0
+# expect: title 0
+# expect: style 0
+# expect: script 0
+# expect: body 0
+# expect: h1 0
+# expect: i 0
+# expect: p 0
+# expect: b 0
+# expect: img 2
+# expect:   src /img/a.png
+# expect:   alt x "y"
+# expect: img 2
+# expect:   srcset b.png
+# expect:   srcset c.png
+# expect:   srcset data:image/png;base64,AA==
+# expect:   srcset d.png
+# expect: a 2
+# expect:   href /about?a=1&b=2
+# expect:   hidden []
+# expect: a 0
+# expect: ul 0
+# expect: li 0
+# expect: li 0
+# expect: --
+# expect: A <b> page
+# expect: Hello world
+# expect: Tea & cakes, fresh today.
+# expect: AboutNo link
+# expect: one
+# expect: two / é � &bogus;
+# expect: --
+# expect: a & b <> & & alone &#; &#xZZ;
+# expect: &lt;a href=&quot;x&quot;&gt;Tom &amp; Jerry&#39;s&lt;/a&gt;
+# expect: <&>
+# expect: a �
+# expect: h�
+# expect: 1
+# expect: 0
+# expect: 1 < 2 and <3
