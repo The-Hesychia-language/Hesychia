@@ -1109,6 +1109,11 @@ table = csv.parse[vector](text)   # from a text
 csv.dump(rows)
 print(csv.to_text(table, sep=";"))
 ```
+A struct reads each row, its fields from the columns of their names:
+```python
+users = csv.load[User](f)         # vector[User]
+csv.dump(users)                   # the field names, then a row each
+```
 
 ### `re`
 Regular expressions in Python's syntax.
