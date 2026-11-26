@@ -22,7 +22,7 @@ manual fn serve(owned listener: Listener, count: i64) -> i64:
 
 managed fn ask(port: i32, verify: bool, ca: Optional[Certificate]):
     try:
-        conn = net.connect_tls("localhost", port, timeout=5.0, verify=verify, authority=ca)
+        conn = net.connect_tls("127.0.0.1", port, timeout=5.0, verify=verify, authority=ca)
         print("hello", to=conn)
         answer = io.read(conn)
         if answer is not None:
