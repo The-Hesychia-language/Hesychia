@@ -169,6 +169,9 @@ impl Lexer {
         if self.peek() == Some('"') && word == "f" {
             return self.lex_format_string(span);
         }
+        if self.peek() == Some('"') && word == "r" {
+            return self.lex_raw_string(span);
+        }
         if self.peek() == Some('"') {
             return Err(Diagnostic::error(span, format!("string prefix `{word}` is not supported yet")));
         }
@@ -265,6 +268,26 @@ impl Lexer {
         }
         self.advance();
         Ok(Tok::Str(text))
+    }
+
+    /// `r"\d+"`: a backslash is kept as written; `\"` keeps both and does not end the string.
+    fn lex_raw_string(&mut self, span: Span) -> Result<Tok> {
+        self.advance();
+        let mut text = String::new();
+        loop {
+            match self.advance() {
+                None | Some('\n') => return Err(Diagnostic::error(span, "unterminated string")),
+                Some('"') => return Ok(Tok::Str(text)),
+                Some('\\') => {
+                    text.push('\\');
+                    match self.advance() {
+                        None | Some('\n') => return Err(Diagnostic::error(span, "unterminated string")),
+                        Some(c) => text.push(c),
+                    }
+                }
+                Some(c) => text.push(c),
+            }
+        }
     }
 
     /// `f"text {expr} text"`: text pieces and the source of each embedded expression.

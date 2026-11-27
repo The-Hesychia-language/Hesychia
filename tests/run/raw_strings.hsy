@@ -1,0 +1,15 @@
+import re
+from io import print
+
+# `r"..."` keeps its backslashes, for regular expressions and Windows paths.
+managed fn main():
+    m = re.search(r"(\d+)-(\w+)", "id 42-abc")
+    if m is not None:
+        print(f"{m.group(1)} {m.group(2)}")
+    print(r"C:\temp\new")
+    print(r"say \"hi\"")
+    print(f"{byte_len(r"\n")} {r"\n" == "\\n"}")
+# expect: 42 abc
+# expect: C:\temp\new
+# expect: say \"hi\"
+# expect: 2 True

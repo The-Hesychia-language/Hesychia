@@ -141,6 +141,7 @@ s = s + "!"
 data = s.bytes()           # vector[u8], the UTF-8 bytes
 back = str.from_bytes(data)  # Optional[str]
 text = str.from_any_bytes(data)  # str: bad bytes become �
+path = r"C:\temp\new"     # raw: backslashes kept as written
 ```
 
 ### f-strings
@@ -1137,7 +1138,7 @@ Regular expressions in Python's syntax.
 ```python
 import re
 
-m = re.search("(\\d+)", "abc 42")
+m = re.search(r"(\d+)", "abc 42")
 if m is not None:
     print(m.group(1))
 ```
