@@ -208,14 +208,20 @@ manual fn udp(host: &str, port: i32, timeout: f64 = 0.0) -> Socket raises IoErro
         raise failure(&address)
     return Socket(socket=socket, address=address)
 
-# Sends `text` as one message to `host` on `port`.
-manual fn send(socket: &Socket, text: &str, host: &str, port: i32) raises IoError:
-    if c_send(socket.socket, text.to_c(), byte_len(text), host.to_c(), port) != 0:
+# Sends `data` as one message to `host` on `port`; a text goes as `text.bytes()`.
+manual fn send(socket: &Socket, data: &vector[u8], host: &str, port: i32) raises IoError:
+    mut sent: i32 = 0
+    if len(data) == 0:
+        sent = c_send(socket.socket, "".to_c(), 0, host.to_c(), port)
+    else:
+        sent = c_send(socket.socket, ptr(&data[0]), len(data), host.to_c(), port)
+    if sent != 0:
         const address: str = f"{host}:{port}"
         raise failure(&address)
 
-# Waits for the next message, and gives it with who sent it, as "host:port".
-manual fn receive(socket: &Socket) -> (str, str) raises IoError:
+# Waits for the next message, and gives its bytes with who sent it, as "host:port";
+# `str.from_bytes` reads a text message.
+manual fn receive(socket: &Socket) -> (vector[u8], str) raises IoError:
     mut bytes: vector[u8] = []
     for _ in range(65536):
         bytes.push(0)
@@ -224,8 +230,4 @@ manual fn receive(socket: &Socket) -> (str, str) raises IoError:
         raise failure(&socket.address)
     while i64(len(bytes)) > count:
         bytes.pop()
-    const sender: str = str.from_c(c_sender())
-    const text: Optional[str] = str.from_bytes(&bytes)
-    if text is None:
-        raise IoError(path=sender, reason="not UTF-8 text")
-    return (text, sender)
+    return (bytes, str.from_c(c_sender()))

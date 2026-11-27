@@ -1198,6 +1198,10 @@ import net
 conn = net.connect("example.com", 80)
 print("GET / HTTP/1.0\r\n\r\n", to=conn)
 reply = io.read(conn, end="")
+
+sock = net.udp("0.0.0.0", 9000)
+net.send(sock, "ping".bytes(), "10.0.0.2", 9000)   # a message is bytes
+data, sender = net.receive(sock)                   # vector[u8], "host:port"
 ```
 
 ### TLS
