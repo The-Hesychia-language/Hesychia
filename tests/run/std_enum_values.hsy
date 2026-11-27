@@ -17,7 +17,7 @@ manual struct Job:
 
 managed fn parse(words: vector[str]):
     try:
-        o = args.to_struct[Options](words)
+        o = args.parse[Options](words)
         print(f"{o.mode} {o.level}")
     except ArgsError as e:
         print(f"error: {e.reason}")

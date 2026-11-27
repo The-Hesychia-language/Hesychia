@@ -12,7 +12,9 @@
 #         report: Optional[str]        an option that may be left out
 #         rest: vector[str]            every word left over
 #
-#     options = args.parse[Options]()
+#     options = args.from_command_line[Options]()
+#
+# `args.parse[Options](words)` reads given words instead, and raises `ArgsError`.
 #
 # A field `dry_run` is the option `--dry-run`; `@short("n")` above it adds `-n`. A field of a
 # `managed enum` takes the word of a case: `mode: Mode = Mode.Fast` reads `--mode dry-run` as
@@ -192,7 +194,7 @@ priv manual fn finish(words: &Words) raises ArgsError:
 
 # `words` read as a `T`: a struct, or an enum whose first word names the case. `words` are
 # the words after the program's name.
-manual fn to_struct[T](words: &vector[str]) -> T raises ArgsError:
+manual fn parse[T](words: &vector[str]) -> T raises ArgsError:
     mut flags: vector[str] = []
     mut shorts: dict[str, str] = dict()
     comptime if is_enum(T):
@@ -322,7 +324,7 @@ priv manual fn program_name(path: &str) -> str:
 
 # The command line of the program, read as a `T`. `--help` writes the help and ends the
 # program; a command line that does not fit writes why, and ends it with the code 2.
-manual fn parse[T]() -> T:
+manual fn from_command_line[T]() -> T:
     const all: vector[str] = os.args()
     mut program: str = "program"
     mut words: vector[str] = []
@@ -339,7 +341,7 @@ manual fn parse[T]() -> T:
         if i == 0:
             command = words[0].copy()
     try:
-        return check to_struct[T](&words)
+        return check parse[T](&words)
     except ArgsError as e:
         print(f"error: {e.reason}\nTry `{program} --help`.", to=stderr)
         os.exit(2)
