@@ -25,24 +25,24 @@ manual struct Stats:
 
 managed fn refused(text: str):
     try:
-        json.to_struct[vector[User]](text)
+        json.parse[vector[User]](text)
     except JsonError as e:
         print(e.reason)
 
 managed fn main():
-    user = json.to_struct[User]("{\"name\": \"Ann\", \"age\": 31, \"tags\": [\"a\", \"b\"], \"address\": {\"city\": \"Lyon\", \"zip\": \"69001\"}, \"extra\": [1]}")
+    user = json.parse[User]("{\"name\": \"Ann\", \"age\": 31, \"tags\": [\"a\", \"b\"], \"address\": {\"city\": \"Lyon\", \"zip\": \"69001\"}, \"extra\": [1]}")
     print(f"{user.name} lives in {user.address.city}, {user.email} {user.tags}")
     user.age += 1
     user.email = "ann@example.com"
     print(json.to_text(user))
-    again = json.to_struct[User](json.to_text(user, indent=2))
+    again = json.parse[User](json.to_text(user, indent=2))
     print(f"{again.age} {again.email}")
 
-    stats = json.to_struct[Stats]("{\"count\": 200, \"ratio\": 0.5, \"scores\": {\"x\": [1, 2], \"y\": []}, \"best\": {\"city\": \"Oslo\", \"zip\": \"0150\"}, \"raw\": [null, {\"k\": true}], \"ok\": true}")
+    stats = json.parse[Stats]("{\"count\": 200, \"ratio\": 0.5, \"scores\": {\"x\": [1, 2], \"y\": []}, \"best\": {\"city\": \"Oslo\", \"zip\": \"0150\"}, \"raw\": [null, {\"k\": true}], \"ok\": true}")
     print(f"{stats.count} {stats.ratio} {stats.scores} {stats.ok}")
     print(json.to_text(stats))
-    numbers = json.to_struct[vector[f64]]("[1, 2.5]")
-    by_name = json.to_struct[dict[str, Optional[i64]]]("{\"a\": 1, \"b\": null}")
+    numbers = json.parse[vector[f64]]("[1, 2.5]")
+    by_name = json.parse[dict[str, Optional[i64]]]("{\"a\": 1, \"b\": null}")
     print(f"{numbers} {by_name} {json.to_text(by_name)} {json.to_text(numbers)}")
 
     f = fs.open("hsy-json-structs.json", fs.Mode.Write)
@@ -65,7 +65,7 @@ managed fn main():
     refused("{}")
     refused("[1")
     try:
-        json.to_struct[Stats]("{\"count\": 300}")
+        json.parse[Stats]("{\"count\": 300}")
     except JsonError as e:
         print(e.reason)
 # expect: Ann lives in Lyon, None ['a', 'b']

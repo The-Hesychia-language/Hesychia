@@ -5,7 +5,7 @@ manual struct Key:
 
 manual fn main():
     try:
-        const _key: Key = check json.to_struct[Key]("{}")
+        const _key: Key = check json.parse[Key]("{}")
     except JsonError as _e:
         pass
 # error: json reads texts, numbers, `bool`, structs, enums, `vector`, `dict`, `Optional` and `Value`

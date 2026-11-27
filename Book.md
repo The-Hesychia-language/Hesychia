@@ -1111,7 +1111,8 @@ Read and write JSON as structs.
 ```python
 import json
 
-user = json.to_struct[User](text)
+user = json.parse[User](text)
+value = json.parse(text)          # a json.Value, without a type
 print(json.to_text(user, indent=2))
 ```
 
