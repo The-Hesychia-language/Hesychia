@@ -238,7 +238,9 @@ impl Checker<'_> {
             self.check_shift_amount(value)?;
             target.clone()
         } else {
-            let found = self.check_expr(value, Some(target))?;
+            let hint =
+                if self.assigning.is_some() { self.widening_hint(value, target) } else { Some(target) };
+            let found = self.check_expr(value, hint)?;
             if let Some(key) = self.assigning
                 && self.widen_variable(key, target, &found, value.span)?
             {

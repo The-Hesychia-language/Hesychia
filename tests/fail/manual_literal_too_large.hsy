@@ -1,0 +1,4 @@
+manual fn main():
+    mut n: i32 = 0
+    n += 5000000000
+# error: the value 5000000000 does not fit in `i32`

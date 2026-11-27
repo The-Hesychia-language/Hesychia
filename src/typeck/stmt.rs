@@ -264,7 +264,7 @@ impl Checker<'_> {
             }
             // A wider value widens an inferred variable instead of being converted.
             (None, Some(key)) => {
-                let found = self.check_expr(value, Some(&ty))?;
+                let found = self.check_expr(value, self.widening_hint(value, &ty))?;
                 if self.widen_variable(key, &ty, &found, value.span)? {
                     return Ok(());
                 }
