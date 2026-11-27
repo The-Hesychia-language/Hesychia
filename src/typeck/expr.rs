@@ -65,6 +65,7 @@ impl Checker<'_> {
             ExprKind::Format(parts) => self.check_format(parts),
             ExprKind::Check { .. } => self.check_check(expr),
             ExprKind::Comprehension { .. } => self.check_comprehension(expr),
+            ExprKind::Collection { .. } => self.check_collection(expr, expected),
             ExprKind::Lambda { .. } => self.check_lambda(expr, false),
             ExprKind::None => match expected {
                 Some(ty @ Type::Optional(_)) => Ok(ty.clone()),

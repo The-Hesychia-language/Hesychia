@@ -122,6 +122,9 @@ fn inside(expr: &mut Expr, change: &mut dyn FnMut(&mut Expr)) {
             inside(iter, change);
             filter.iter_mut().for_each(|f| inside(f, change));
         }
+        ExprKind::Collection { keys, values, .. } => {
+            keys.iter_mut().chain(values.iter_mut().flatten()).for_each(|e| inside(e, change));
+        }
         ExprKind::Int(_)
         | ExprKind::Float(_)
         | ExprKind::Bool(_)

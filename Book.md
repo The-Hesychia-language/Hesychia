@@ -384,7 +384,8 @@ ages["ana"] = 31
 ages["ana"] += 1
 "ana" in ages
 ages.get("eve")      # None
-d = {'a': 1}
+d = {"a": 1, "b": 2}  # a literal
+empty = dict[str, i32]()  # `{}` only where its type is known
 ```
 
 ### `set`

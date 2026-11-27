@@ -2,6 +2,7 @@
 
 mod builtin;
 mod call;
+mod collections;
 mod comptime_fn;
 mod errors;
 mod expr;
@@ -209,7 +210,7 @@ struct Checker<'a> {
     /// arguments from where it goes.
     expected_struct: Option<Type>,
     lambdas: usize,
-    /// Hidden vectors made for comprehensions, for unique names.
+    /// Hidden collections made for comprehensions and literals, for unique names.
     comprehensions: usize,
     /// Error types reaching each open `try`, innermost last.
     tries: Vec<Vec<Type>>,

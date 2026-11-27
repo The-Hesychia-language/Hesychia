@@ -231,8 +231,8 @@ The standard library is written in Hesychia, in `stdlib/`, and built into `hsy`:
 |---|---|
 | `str` | `bytes()` (the UTF-8 bytes, as a `vector[u8]`), `byte_slice(start, end)` (the text between two bytes, as `byte` and `byte_len` count, each at the start of a character), `kebab_case()` (`"DryRun"` is `"dry-run"`, as `args`, `json` and `csv` name the cases of an enum), `starts_with`, `ends_with`, `find` (a character position), `strip()` and `strip(side=Side.Start)` or `side=Side.End`, `split(sep)` and `split()` on spaces, `replace`, `upper`, `lower` (Unicode, as Python: `"straße".upper()` is `"STRASSE"`), `sep.join(parts)`, `s[a:b]` by characters, `part in s` |
 | `vector` | `contains`, `find`, `count`, `reverse`, `extend`, `sort` (stable), `v[a:b]` (a copy), `x in v`; `swap(i, j)` is the compiler's |
-| `dict[K, V]` | `d = dict[str, i32]()`, `d[k] = v`, `d[k] += 1`, `k in d`, `len(d)`, `get`, `remove`, `clear`, `keys`, `values`, `items`, in the order entries were added; a missing key in `d[k]` stops the program; written `{'a': 1}` |
-| `set[T]` | `add`, `remove`, `in`, `len`, `clear`, `values`, `union`, `intersection`; written `{1, 2}`, or `set()` when empty |
+| `dict[K, V]` | `d = dict[str, i32]()`, `d[k] = v`, `d[k] += 1`, `k in d`, `len(d)`, `get`, `remove`, `clear`, `keys`, `values`, `items`, in the order entries were added; a missing key in `d[k]` stops the program; a literal `{"a": 1, "b": 2}` builds one, and `{}` an empty one where its type is known; f-strings write it `{'a': 1}` |
+| `set[T]` | `add`, `remove`, `in`, `len`, `clear`, `values`, `union`, `intersection`; a literal `{1, 2}` builds one; f-strings write it `{1, 2}`, or `set()` when empty |
 | functions | `min(a, b)` and `min(v)` (`None` for an empty vector), the same for `max`, `sum(v)`, `sum(v, start)` |
 | conversions | `i64("42")`, `u8(s)`, `f64("2.5e1")`... raise `ParseError`, with the `text` read and a `reason` (`not a whole number`, ``too large for `u8` ``); spaces around are allowed; `i64(text, base=16)` reads another base, from 2 to 36, where `0x` (16), `0o` (8) or `0b` (2) may start the digits: `u64("0x401000", base=16)`; `str(x)` writes `x` as `f"{x}"` does |
 

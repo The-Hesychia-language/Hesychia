@@ -70,6 +70,12 @@ pub(super) struct Templates {
 }
 
 impl Templates {
+    /// Whether `ty` was made from `template`, as `dict[str, i32]` from `dict`.
+    pub fn is_instance(&self, kind: Kind, template: usize, ty: &Type) -> bool {
+        let (Kind::Struct, Type::Struct(named)) = (kind, ty) else { return false };
+        self.made.iter().any(|((k, t, _), id)| *k == kind && *t == template && *id == named.id)
+    }
+
     /// A call to `sig`: if it is a method made from a template, its body is now needed.
     pub fn called(&mut self, sig: usize) {
         if let Some(method) = self.unused.remove(&sig) {
