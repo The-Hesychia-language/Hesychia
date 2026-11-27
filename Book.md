@@ -104,7 +104,7 @@ h = h.wrapping_add(500000000)
 Change a number's type; `T(x)` stops the program if the value does not fit.
 ```python
 const y: i32 = i32(3.99)          # 3
-const s: u8 = u8.checked(300)     # Optional: None
+const s: Optional[u8] = u8.checked(300)   # None
 const t: u8 = u8.truncate(300)    # 44, low bits
 const bits: u32 = u32.reinterpret(1.0)
 ```
@@ -651,7 +651,8 @@ manual struct Node:
     next: Optional[heap[Node]]
 
 const list: Node = Node(1, allocate(Node(2, None)))
-const inner: Node = deallocate(box)
+const b: heap[Node] = allocate(Node(3, None))
+const inner: Node = deallocate(b)    # the value back, its memory released
 ```
 
 ### `shared[T]`
@@ -1019,7 +1020,7 @@ managed fn sorts():
 ### `io`
 Read and write text.
 ```python
-from io import print, input, read, stderr
+from io import print, input, read, stdin, stderr
 
 name = input("name? ")
 print("oops", to=stderr)
@@ -1136,7 +1137,7 @@ Regular expressions in Python's syntax.
 ```python
 import re
 
-m = re.search(r"(\d+)", "abc 42")
+m = re.search("(\\d+)", "abc 42")
 if m is not None:
     print(m.group(1))
 ```
