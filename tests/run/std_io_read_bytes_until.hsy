@@ -1,0 +1,16 @@
+import fs
+import io
+from io import print
+
+# `read_bytes_until` stops at `end`, as `read` does, and keeps it on demand.
+managed fn main():
+    path = "hsy-read-bytes-until.bin"
+    fs.write_bytes(path, "user: ann\nrest".bytes())
+    f = fs.open(path)
+    print(f"{io.read_bytes_until(f, end=": ", keep=True)}")
+    print(f"{io.read_bytes_until(f)}")
+    print(f"{io.read_bytes_until(f, end="")}")
+    fs.remove(path)
+# expect: [117, 115, 101, 114, 58, 32]
+# expect: [97, 110, 110]
+# expect: [114, 101, 115, 116]
