@@ -1,0 +1,5 @@
+import lib.secret
+
+manual fn main():
+    const x: Optional[secret.Internal] = None
+# error: `Internal` is private to module

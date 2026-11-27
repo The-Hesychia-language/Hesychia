@@ -170,6 +170,10 @@ impl Tables {
             }
             TypeExpr::Named { name, args, span } => (name.as_str(), args.as_slice(), *span),
         };
+        if name.contains('.') {
+            let args = args.iter().map(resolve).collect::<Result<Vec<_>>>()?;
+            return self.qualified_type(module, name, args, span);
+        }
         if let Some(ty) = scalar_type(texpr) {
             return Ok(ty);
         }
@@ -283,6 +287,36 @@ impl Tables {
                 },
                 _ => Err(Diagnostic::error(span, format!("unknown size `{len}`"))),
             },
+        }
+    }
+
+    /// `fs.Stat`: a type that another module exports, reached through that module.
+    fn qualified_type(&self, module: usize, name: &str, args: Vec<Type>, span: Span) -> Result<Type> {
+        let (path, item) = name.rsplit_once('.').expect("a qualified name");
+        let mut parts = path.split('.');
+        let first = parts.next().expect("split gives one part");
+        let Some(Symbol::Module(mut source)) = self.lookup(module, first) else {
+            return Err(Diagnostic::error(span, format!("`{first}` is not a module"))
+                .with_hint(format!("import it with `import {first}`")));
+        };
+        for part in parts {
+            match self.export(source, part, span)? {
+                Symbol::Module(next) => source = next,
+                _ => return Err(Diagnostic::error(span, format!("`{part}` is not a module"))),
+            }
+        }
+        let named = |id| Named { id, name: item.to_string() };
+        match (self.export(source, item, span)?, args.is_empty()) {
+            (Symbol::Struct(id), true) => Ok(Type::Struct(named(id))),
+            (Symbol::Enum(id), true) => {
+                Ok(Type::Enum { named: named(id), plain: self.types.enums[id].plain })
+            }
+            (Symbol::GenericStruct(template), _) => self.templates.find(Kind::Struct, template, args, span),
+            (Symbol::GenericEnum(template), _) => self.templates.find(Kind::Enum, template, args, span),
+            (Symbol::Struct(_) | Symbol::Enum(_), false) => {
+                Err(Diagnostic::error(span, format!("`{name}` takes no type arguments")))
+            }
+            _ => Err(Diagnostic::error(span, format!("`{name}` is not a type"))),
         }
     }
 
