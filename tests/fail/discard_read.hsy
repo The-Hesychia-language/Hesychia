@@ -1,0 +1,5 @@
+from io import print
+managed fn main():
+    a, _ = (1, 2)
+    print(f"{_}")
+# error: `_` discards a value: it cannot be read

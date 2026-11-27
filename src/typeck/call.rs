@@ -79,6 +79,10 @@ impl Checker<'_> {
                     expr.kind = ExprKind::Int(value);
                     Ok(ty)
                 }
+                None if name == "_" => {
+                    Err(Diagnostic::error(expr.span, "`_` discards a value: it cannot be read")
+                        .with_hint("give the value a name"))
+                }
                 None => Err(Diagnostic::error(expr.span, format!("unknown variable `{name}`"))),
             },
         }

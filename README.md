@@ -277,7 +277,7 @@ f"{ratio:.1%}"   # 25.6%         f"{x:+.1f}"    # +3.1           f"{big:.2e}"  #
 
 `deallocate(b)` takes the value out of a `heap[T]` and gives its memory back, the reverse of `allocate(x)`; `&b` lends what a `heap` holds where a `&T` is expected. An enum's type parameters can have bounds (`enum Tree[T: Order]`). `x = f(x)` can move `x` in a loop, since it is filled again. `while True:` without a `break` counts as never ending, so a function may end with one. A `comptime` constant can be a variant without fields of an enum (`comptime MODE: Mode = Mode.Safe`), which `comptime if` compares with `==` and `!=`.
 
-A value can be moved inside a loop when the loop is left right after, by `return` or `break`, with no `continue` in between. A value given where an `Optional[T]` is expected is converted to `T` first, as `managed` converts. A parameter's name cannot be declared again at the top of its function.
+A value can be moved inside a loop when the loop is left right after, by `return` or `break`, with no `continue` in between. A value given where an `Optional[T]` is expected is converted to `T` first, as `managed` converts. A parameter's name cannot be declared again at the top of its function. `_` discards a value wherever a name would bind it (`a, _ = pair`, `for _ in range(3)`, `const (x, _): (i32, str) = ...`), as often as needed, and `_ = f()` lets the result go at once; `_` is never read.
 
 The modules share their words: `load` and `dump` for formats, `read` and `print` for text, `sys_` for direct system calls, `to=` for where writing goes, `end=` for where reading or writing stops, `unit=` for durations, options as enum variants (`time.Unit.Ms`, `fs.Mode.Write`). Each module works on Linux, macOS and Windows.
 

@@ -1,0 +1,26 @@
+from io import print
+
+# `_` discards: written as often as needed, never read.
+managed fn pair() -> (i32, str):
+    return (1, "a")
+manual fn mpair() -> (i32, str):
+    return (2, "b")
+managed fn main():
+    a, _ = pair()
+    b, _ = pair()
+    _ = pair()
+    _ = "x"
+    for _ in range(2):
+        pass
+    for k, _ in {"q": 1}.items():
+        print(k)
+    print(f"{a} {b} {[1 for _ in range(3)]}")
+    m()
+manual fn m():
+    const (x, _): (i32, str) = mpair()
+    const (y, _): (i32, str) = mpair()
+    _ = mpair()
+    print(f"{x} {y}")
+# expect: q
+# expect: 1 1 [1, 1, 1]
+# expect: 2 2
