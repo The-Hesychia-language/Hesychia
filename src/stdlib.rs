@@ -30,6 +30,7 @@ const MODULES: &[(&str, &str)] = &[
     ("offsec.encode", include_str!("../stdlib/offsec/encode.hsy")),
     ("offsec.fmt", include_str!("../stdlib/offsec/fmt.hsy")),
     ("offsec.payload", include_str!("../stdlib/offsec/payload.hsy")),
+    ("offsec.quine", include_str!("../stdlib/offsec/quine.hsy")),
     ("offsec.rop", include_str!("../stdlib/offsec/rop.hsy")),
     ("offsec.shellcode", include_str!("../stdlib/offsec/shellcode.hsy")),
     ("offsec.tube", include_str!("../stdlib/offsec/tube.hsy")),

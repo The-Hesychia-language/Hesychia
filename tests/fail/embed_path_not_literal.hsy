@@ -1,0 +1,4 @@
+manual fn main():
+    const p: str = "lib/x.txt"
+    const t: str = embed(p)
+# error: `embed` takes a path written as a text

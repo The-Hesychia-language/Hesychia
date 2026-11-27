@@ -6,6 +6,9 @@ use crate::types::Type;
 pub struct Program {
     /// The module holding `main` comes first.
     pub modules: Vec<Module>,
+    /// The files the program is built from, by their path in a copy of it: what `source()`
+    /// and `offsec.quine` give back.
+    pub files: Vec<(String, String)>,
 }
 
 pub struct Module {
@@ -13,6 +16,10 @@ pub struct Module {
     pub name: String,
     /// Part of the standard library, which may `extend` the built-in types.
     pub stdlib: bool,
+    /// Its file on disk, from which `embed("...")` paths start; `None` in the standard library.
+    pub file: Option<std::path::PathBuf>,
+    /// Its entry in `Program::files`, which `source()` gives; `None` when it is not copied.
+    pub key: Option<String>,
     pub imports: Vec<Import>,
     pub items: Vec<Item>,
 }
@@ -564,6 +571,8 @@ pub enum ExprKind {
     Tuple(Vec<Expr>),
     /// `[a, b, c]`
     ArrayLit(Vec<Expr>),
+    /// The bytes of a file, from `embed_bytes("...")`: a `vector[u8]`.
+    Bytes(Vec<u8>),
     /// A struct value, with one expression per field in declaration order.
     Construct(Vec<Expr>),
     /// `x.copy()`: a duplicate that leaves `x` untouched.

@@ -9,7 +9,7 @@ use std::process::Command;
 use crate::platform::Platform;
 
 pub const MANIFEST: &str = "hesychia.toml";
-const LOCKFILE: &str = "hesychia.lock";
+pub const LOCKFILE: &str = "hesychia.lock";
 
 /// What `hesychia.toml` says.
 pub struct Manifest {
@@ -53,6 +53,9 @@ pub struct Package {
     pub prefix: String,
     /// Its `src/` folder (or the folder of a lone `.hsy` file).
     pub root: PathBuf,
+    /// The folder of its `hesychia.toml`: the project's, or a `path` dependency's; `None` for a
+    /// lone file and a Git dependency.
+    pub folder: Option<PathBuf>,
     pub dependencies: HashMap<String, usize>,
 }
 
@@ -70,7 +73,12 @@ impl Project {
         let root = path.parent().unwrap_or(Path::new("")).to_path_buf();
         Self {
             manifest: None,
-            packages: vec![Package { prefix: String::new(), root, dependencies: HashMap::new() }],
+            packages: vec![Package {
+                prefix: String::new(),
+                root,
+                folder: None,
+                dependencies: HashMap::new(),
+            }],
             links: Vec::new(),
         }
     }
@@ -89,6 +97,7 @@ impl Project {
         loader.packages.push(Package {
             prefix: String::new(),
             root: dir.join("src"),
+            folder: Some(dir.to_path_buf()),
             dependencies: HashMap::new(),
         });
         loader.add_dependencies(0, &manifest, &mut lock)?;
@@ -235,7 +244,13 @@ impl PackageLoader {
         let index = self.packages.len();
         self.by_name.insert(dep.name.clone(), (dep.source.clone(), index));
         let root = folder.join("src");
-        self.packages.push(Package { prefix: dep.name.clone(), root, dependencies: HashMap::new() });
+        let copied = matches!(dep.source, Source::Path(_)).then(|| folder.clone());
+        self.packages.push(Package {
+            prefix: dep.name.clone(),
+            root,
+            folder: copied,
+            dependencies: HashMap::new(),
+        });
         let manifest = read_manifest(&folder).map_err(|e| format!("dependency `{}`: {e}", dep.name))?;
         self.add_links(&manifest.links);
         self.add_dependencies(index, &manifest, lock)?;

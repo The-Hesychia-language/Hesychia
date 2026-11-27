@@ -116,6 +116,10 @@ pub(super) struct Tables {
     pub computed: std::cell::RefCell<Vec<super::comptime_fn::ComputedCall>>,
     /// The machine the program is built for, which `comptime` code can ask about.
     pub target: Option<Target>,
+    /// `Program::files`, and each module's file on disk and entry among them.
+    pub files: Vec<(String, String)>,
+    pub module_files: Vec<Option<std::path::PathBuf>>,
+    pub module_keys: Vec<Option<String>>,
 }
 
 impl Tables {
@@ -298,10 +302,16 @@ impl Tables {
 
 /// Runs the three resolution phases and checks `main`.
 pub(super) fn build(program: &mut Program, target: &Target) -> Result<Tables> {
-    let mut tables =
-        Tables { traits: super::traits::builtin_traits(), target: Some(target.clone()), ..Tables::default() };
+    let mut tables = Tables {
+        traits: super::traits::builtin_traits(),
+        target: Some(target.clone()),
+        files: program.files.clone(),
+        ..Tables::default()
+    };
     for (index, module) in program.modules.iter_mut().enumerate() {
         tables.module_paths.push(module.name.clone());
+        tables.module_files.push(module.file.clone());
+        tables.module_keys.push(module.key.clone());
         tables.exports.push(stdlib_exports(&module.name));
         let items = std::mem::take(&mut module.items);
         let stdlib = module.stdlib;

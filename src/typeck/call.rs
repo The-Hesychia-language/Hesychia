@@ -126,6 +126,11 @@ impl Checker<'_> {
             "doc" if type_args.is_empty() && args.len() == 1 && self.global("doc").is_none() => {
                 return self.check_doc(expr);
             }
+            "embed" | "embed_bytes" | "source" | "program_source" | "program_files"
+                if type_args.is_empty() && self.global(callee).is_none() =>
+            {
+                return self.check_embedded(expr, expected.as_ref());
+            }
             "range" => return Err(Diagnostic::error(span, "`range` can only be used in a `for` loop")),
             _ if !type_args.is_empty() && !self.is_generic_fn(callee) => {
                 return Err(Diagnostic::error(span, format!("`{callee}` does not take type arguments")));

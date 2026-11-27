@@ -38,6 +38,7 @@ impl Checker<'_> {
             ExprKind::Bool(_) => Ok(Type::Bool),
             ExprKind::Char(_) => Ok(Type::Char),
             ExprKind::Str(_) => Ok(Type::Str),
+            ExprKind::Bytes(_) => Ok(Type::Vector(Box::new(Type::Int(IntTy::U8)))),
             ExprKind::Name(_) => self.check_name(expr),
             ExprKind::Unary(op, operand) => self.check_unary(*op, operand, expected, span),
             ExprKind::Binary(BinOp::In | BinOp::NotIn, ..) => self.check_in(expr),

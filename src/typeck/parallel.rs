@@ -507,6 +507,7 @@ fn names(expr: &Expr, out: &mut BTreeSet<String>) {
             all(args, out);
         }
         ExprKind::Int(_)
+        | ExprKind::Bytes(_)
         | ExprKind::Float(_)
         | ExprKind::Bool(_)
         | ExprKind::Str(_)

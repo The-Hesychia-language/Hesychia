@@ -215,3 +215,55 @@ fn settings_link_c_libraries() {
     let refused = hsy(&app, &["build"]);
     assert!(String::from_utf8_lossy(&refused.stderr).contains("`links` is a list of C library names"));
 }
+
+/// `offsec.quine.write` copies the project with its path dependencies, Git ones pinned by the
+/// lock and left out; the copy builds and runs, and is itself a quine.
+#[test]
+fn a_quine_copies_the_project() {
+    let dir = workspace("quine");
+    library(
+        &dir.join("numbers"),
+        "numbers",
+        "import ops\n\nmanaged fn double(x: i64) -> i64:\n    return ops.twice(x)\n",
+    );
+    write(&dir.join("numbers/src/ops.hsy"), "managed fn twice(x: i64) -> i64:\n    return x * 2\n");
+    let text = dir.join("text");
+    library(&text, "text", "managed fn shout(s: str) -> str:\n    return f\"{s}!\"\n");
+    git(&text, &["init", "-q"]);
+    git(&text, &["add", "."]);
+    git(&text, &["commit", "-qm", "one"]);
+    let app = dir.join("app");
+    write(
+        &app.join("hesychia.toml"),
+        &format!(
+            "[project]\nname = \"app\"\n\n[dependencies]\nnumbers = {{ path = \"../numbers\" }}  # kept\ntext = {{ git = \"{}\" }}\n",
+            text.display().to_string().replace('\\', "/")
+        ),
+    );
+    write(
+        &app.join("src/main.hsy"),
+        "import numbers\nimport text\nimport offsec.quine\nfrom io import print\n\nmanaged fn main():\n    print(text.shout(f\"{numbers.double(21)}\"))\n    quine.write(to=\"../copy\", overwrite=True)\n",
+    );
+    assert_eq!(stdout(&hsy(&app, &["run"])), "42!\n");
+    let copy = dir.join("copy");
+    let mut files: Vec<String> = Vec::new();
+    for entry in [
+        "hesychia.toml",
+        "hesychia.lock",
+        "src/main.hsy",
+        "deps/numbers/hesychia.toml",
+        "deps/numbers/src/lib.hsy",
+        "deps/numbers/src/ops.hsy",
+    ] {
+        assert!(copy.join(entry).is_file(), "{entry} is copied");
+        files.push(entry.into());
+    }
+    assert!(!copy.join("deps/text").exists(), "a Git dependency is not copied");
+    let manifest = fs::read_to_string(copy.join("hesychia.toml")).expect("manifest");
+    assert!(manifest.contains("numbers = { path = \"deps/numbers\" }  # kept"), "{manifest}");
+    assert_eq!(
+        fs::read_to_string(copy.join("src/main.hsy")).expect("main"),
+        fs::read_to_string(app.join("src/main.hsy")).expect("main")
+    );
+    assert_eq!(stdout(&hsy(&copy, &["run"])), "42!\n");
+}

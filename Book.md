@@ -842,6 +842,14 @@ comptime for f in fields(T):
     print(f"{f.name} = {field(x, f)}")
 ```
 
+### Embedded files
+A file placed in the program when compiling, from the folder of this file.
+```python
+help = embed("data/help.txt")        # str
+logo = embed_bytes("data/logo.png")  # vector[u8]
+me = source()                        # this file, as it was compiled
+```
+
 ### Layout queries
 Size and alignment of a type.
 ```python
@@ -1315,6 +1323,17 @@ Build a `printf` format-string write of a value to an address.
 from offsec.fmt import write
 
 payload = write(0x404040, 0xdeadbeef, offset=6)    # x86-64; width=Width.Bits32
+```
+
+### `offsec.quine`
+The program's own source, placed in it when compiling.
+```python
+import offsec.quine
+
+print(quine.source(), end="")    # the main file, byte for byte
+quine.write(to="clone")          # every file of the program; `hsy build` works there
+quine.write(to="clone", overwrite=True)
+child = quine.source().replace("COUNT: i64 = 5", "COUNT: i64 = 4")
 ```
 
 ### `offsec.tube`
