@@ -1,0 +1,13 @@
+from io import print
+
+# `embed` and `embed_bytes` place a file in the program when compiling, from the folder of
+# this file; `source()` is this file as it was compiled.
+manual fn main():
+    const text: str = embed("lib/embedded.txt")
+    const bytes: vector[u8] = embed_bytes("lib/embedded.txt")
+    const me: str = source()
+    print(text, end="")
+    print(f"{len(bytes)} {bytes[0]} {me.starts_with("from io import print")}")
+# expect: line one
+# expect: line two
+# expect: 18 108 True

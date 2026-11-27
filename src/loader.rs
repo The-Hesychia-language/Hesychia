@@ -29,6 +29,7 @@ pub fn load(
         (stdlib::PRELUDE.to_string(), prelude, None),
     ]);
     let mut modules = Vec::new();
+    let mut own = Vec::new();
     while let Some((name, file, package)) = queue.pop_front() {
         let mut parsed = parser::parse(lexer::lex(sources.source(file), file)?)?;
         for import in &mut parsed.imports {
@@ -55,9 +56,20 @@ pub fn load(
                 items.extend(parser::parse(lexer::lex(sources.source(runner), runner)?)?.items);
             }
         }
-        modules.push(Module { name, stdlib, imports: parsed.imports, items });
+        if let Some(package) = package {
+            own.push((modules.len(), package, file));
+        }
+        let path = package.map(|_| PathBuf::from(sources.path(file)));
+        modules.push(Module { name, stdlib, file: path, key: None, imports: parsed.imports, items });
     }
-    let mut program = Program { modules };
+    let given: Vec<(usize, &str, &str)> =
+        own.iter().map(|&(_, package, file)| (package, sources.path(file), sources.source(file))).collect();
+    let files = crate::sources::collect(project, &given)
+        .map_err(|message| Diagnostic::error(Span::new(main_file, 1, 1), message))?;
+    for (&(index, _, _), key) in own.iter().zip(files.keys) {
+        modules[index].key = key;
+    }
+    let mut program = Program { modules, files: files.list };
     crate::derive::expand(&mut program, sources)?;
     Ok(program)
 }

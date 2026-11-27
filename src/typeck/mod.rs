@@ -4,6 +4,7 @@ mod builtin;
 mod call;
 mod collections;
 mod comptime_fn;
+mod embed;
 mod errors;
 mod expr;
 mod extend;

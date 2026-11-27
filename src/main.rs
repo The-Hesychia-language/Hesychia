@@ -11,6 +11,7 @@ mod loader;
 mod parser;
 mod platform;
 mod project;
+mod sources;
 mod stdlib;
 mod typeck;
 mod types;

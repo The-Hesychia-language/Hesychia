@@ -368,6 +368,21 @@ impl Emitter<'_> {
         code + &format!("{temp}; }})")
     }
 
+    /// The bytes of `embed_bytes(...)`: a fresh vector copied from data in the binary.
+    pub(super) fn emit_bytes(&mut self, ty: &Type, bytes: &[u8]) -> String {
+        let c_type = self.types.c_type(ty);
+        if bytes.is_empty() {
+            return format!("(({c_type}){{0}})");
+        }
+        let (data, temp) = (self.temp("bytes"), self.temp("vector"));
+        let listed: Vec<String> = bytes.iter().map(u8::to_string).collect();
+        format!(
+            "({{ static const uint8_t {data}[] = {{{}}}; {c_type} {temp} = {{0}}; {c_type}_reserve(&{temp}, {n}); memcpy({temp}.data, {data}, {n}); {temp}.len = {n}; {temp}; }})",
+            listed.join(","),
+            n = bytes.len(),
+        )
+    }
+
     /// `v[i]` on a vector, checked against its current length.
     pub(super) fn emit_vector_index(&mut self, base: &Expr, index: &Expr) -> String {
         let (vector, position) = (self.emit_expr(base), self.emit_expr(index));

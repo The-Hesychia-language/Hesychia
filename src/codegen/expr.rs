@@ -65,6 +65,7 @@ impl Emitter<'_> {
                 self.types.c_type(&Type::Str);
                 format!("((hsy_str){{(char*){}, {}, 0}})", c_string(text), text.len())
             }
+            ExprKind::Bytes(bytes) => self.emit_bytes(expr.ty(), bytes),
             ExprKind::Format(parts) => self.emit_format(parts),
             ExprKind::FnRef(c_name) => c_name.clone(),
             ExprKind::Lambda { captures, params, body, c_name, .. } => match expr.ty() {

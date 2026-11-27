@@ -1,0 +1,40 @@
+# offsec.quine: the program's own source, placed in the binary when compiling.
+#
+#     import offsec.quine
+#
+#     print(quine.source())                  # the main file, byte for byte
+#     quine.write(to="clone")                # the whole program: `hsy build` works in `clone`
+#
+# What comes back is what was compiled, not what is on disk now: the program never reads its
+# own files. `files()` holds the modules of the project and of its `path` dependencies (put in
+# `deps/<name>/`, their manifests pointing there), `hesychia.toml` and `hesychia.lock`; Git
+# dependencies are pinned by the lock, and the standard library comes with the compiler.
+# For a lone file, it is that file and the modules beside it that it imports.
+
+import fs
+from io import IoError
+
+# The main file, as it was compiled.
+manual fn source() -> str:
+    return program_source()
+
+# Every file of the program, by its path in a copy of it, with `/` between folders.
+manual fn files() -> dict[str, str]:
+    return program_files()
+
+# Writes the program's files under the folder `to`, as they were laid out. A file already
+# there raises `IoError` before anything is written, unless `overwrite` is set; other files in
+# `to` are left alone.
+manual fn write(to: &str, overwrite: bool = False) raises IoError:
+    const all: dict[str, str] = files()
+    if not overwrite:
+        for path in all.keys():
+            const target: str = fs.join(to, &path)
+            if fs.exists(&target):
+                raise IoError(path=target, reason="already exists; `overwrite=True` replaces it")
+    for path, text in all.items():
+        const target: str = fs.join(to, &path)
+        const folder: str = fs.parent(&target)
+        check fs.make_dir(&folder, parents=True)
+        const bytes: vector[u8] = text.bytes()
+        check fs.write_bytes(&target, &bytes)

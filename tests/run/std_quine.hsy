@@ -1,0 +1,20 @@
+import fs
+import offsec.quine
+from io import print, IoError
+
+# `offsec.quine` gives back the program as it was compiled, and writes a copy of it.
+managed fn main():
+    print(f"{quine.source() == source()} {quine.files().keys()}")
+    quine.write(to="hsy-quine")
+    data = fs.read_bytes(fs.join("hsy-quine", "std_quine.hsy"))
+    copied = str.from_any_bytes(data)
+    print(f"{copied == quine.source()}")
+    try:
+        quine.write(to="hsy-quine")
+    except IoError as e:
+        print(f"{fs.name(e.path)}: {e.reason}")
+    quine.write(to="hsy-quine", overwrite=True)
+    fs.remove("hsy-quine", recursive=True)
+# expect: True ['std_quine.hsy']
+# expect: True
+# expect: std_quine.hsy: already exists; `overwrite=True` replaces it

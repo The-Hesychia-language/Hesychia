@@ -126,6 +126,7 @@ fn inside(expr: &mut Expr, change: &mut dyn FnMut(&mut Expr)) {
             keys.iter_mut().chain(values.iter_mut().flatten()).for_each(|e| inside(e, change));
         }
         ExprKind::Int(_)
+        | ExprKind::Bytes(_)
         | ExprKind::Float(_)
         | ExprKind::Bool(_)
         | ExprKind::Str(_)
