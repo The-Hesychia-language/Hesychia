@@ -27,10 +27,10 @@ managed fn main():
     parse(["--mode", "dry-run", "--level=fast"])
     parse(["--mode", "slow"])
     print(args.help[Options]("run").replace("\n\n", "\n.\n"))
-    job = json.to_struct[Job]("{\"name\": \"x\", \"mode\": \"dry-run\"}")
+    job = json.parse[Job]("{\"name\": \"x\", \"mode\": \"dry-run\"}")
     print(f"{job.mode} {json.to_text(job)}")
     try:
-        json.to_struct[Job]("{\"name\": \"x\", \"mode\": \"slow\"}")
+        json.parse[Job]("{\"name\": \"x\", \"mode\": \"slow\"}")
     except JsonError as e:
         print(e.reason)
 # expect: Mode.Fast None

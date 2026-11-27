@@ -183,7 +183,7 @@ priv manual fn read_value(s: &mut Scanner, depth: size) -> Value raises JsonErro
     return Value.Number(check read_number(s))
 
 # The value written in `text`.
-manual fn parse(text: &str) -> Value raises JsonError:
+priv manual fn parse_value(text: &str) -> Value raises JsonError:
     mut s: Scanner = scan.over(text)
     const value: Value = check read_value(&mut s, 0)
     s.skip_space()
@@ -402,11 +402,13 @@ priv manual fn fill[T](out: &mut T, value: &Value) raises JsonError:
     else:
         comptime assert(False, "json reads texts, numbers, `bool`, structs, enums, `vector`, `dict`, `Optional` and `Value`")
 
-# `text` read as a `T`: `json.to_struct[User](text)` for a struct, or
-# `json.to_struct[vector[User]](text)` for a list of them. What does not fit raises a
+# `text` read as a `T`: a `Value` by default, `json.parse[User](text)` for a struct, or
+# `json.parse[vector[User]](text)` for a list of them. What does not fit raises a
 # `JsonError` whose reason says where: "users[2].age: expected a number".
-manual fn to_struct[T](text: &str) -> T raises JsonError:
-    const value: Value = check parse(text)
+manual fn parse[T = Value](text: &str) -> T raises JsonError:
+    comptime if T == Value:
+        return check parse_value(text)
+    const value: Value = check parse_value(text)
     mut out: T = empty[T]()
     try:
         check fill(&mut out, &value)
@@ -420,15 +422,12 @@ manual fn to_struct[T](text: &str) -> T raises JsonError:
     return out
 
 # What is written in the file: a `Value`, or with `json.load[User](f)` a `User`, read as
-# `to_struct` reads it.
+# `parse` reads it.
 manual fn load[T = Value](f: &File) -> T raises JsonError | IoError:
     const text: Optional[str] = check io.read(f, end="")
     if text is None:
         raise JsonError(line=1, column=1, reason="expected a value")
-    comptime if T == Value:
-        return check parse(&text)
-    else:
-        return check to_struct[T](&text)
+    return check parse[T](&text)
 
 # `x` as a `Value`.
 priv manual fn to_value[T](x: &T) -> Value:
@@ -470,7 +469,7 @@ priv manual fn to_value[T](x: &T) -> Value:
         comptime assert(False, "json writes texts, numbers, `bool`, structs, enums, `vector`, `dict`, `Optional` and `Value`")
 
 # `value` as JSON text: on one line, or with `indent` spaces per level. `value` is a
-# `Value`, or anything `to_struct` reads.
+# `Value`, or anything `parse` reads.
 manual fn to_text[T](value: &T, indent: size = 0) -> str:
     mut out: str = ""
     comptime if T == Value:
