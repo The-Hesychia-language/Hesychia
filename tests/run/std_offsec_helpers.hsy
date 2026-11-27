@@ -62,7 +62,7 @@ managed fn check_write(target: u64, value: u64, offset: size, bits: Width) -> bo
     return ok
 
 managed fn main():
-    s64 = sh(Width.Bits64)
+    s64 = sh()
     s32 = sh(Width.Bits32)
     print(f"sh64 len={len(s64)} nullfree={not has_byte(s64, u8(0))}")
     print(f"sh32 len={len(s32)} nullfree={not has_byte(s32, u8(0))}")
@@ -77,9 +77,11 @@ managed fn main():
     print(f"xor back={back}")
     print(f"fmt64={check_write(0x404040, 0xdeadbeef, 6, Width.Bits64)}")
     print(f"fmt32={check_write(0x8048000, 0x4142, 4, Width.Bits32)}")
+    print(f"fmt default={write(0x404040, 0xdeadbeef, 6) == write(0x404040, 0xdeadbeef, 6, Width.Bits64)}")
 # expect: sh64 len=23 nullfree=True
 # expect: sh32 len=25 nullfree=True
 # expect: xor=[190, 189]
 # expect: xor back=[65, 66]
 # expect: fmt64=True
 # expect: fmt32=True
+# expect: fmt default=True

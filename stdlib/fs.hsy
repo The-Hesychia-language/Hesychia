@@ -433,7 +433,7 @@ manual fn write_unique(path: &str, bytes: &vector[u8]) -> str raises IoError:
 # What the file system knows of a file. Dates are in seconds since 1970, as
 # `time.timestamp()` gives them, so `time.date(info.modified)` writes one.
 manual struct Stat:
-    size: i64
+    size: u64
     kind: Kind
     modified: f64
     accessed: f64
@@ -467,7 +467,7 @@ manual fn stat(path: &str, follow: bool = True) -> Stat raises IoError:
     mut created: Optional[f64] = None
     if values[11] == 1:
         created = seconds(&values, 8)
-    return Stat(size=values[0], kind=found, modified=seconds(&values, 2), accessed=seconds(&values, 4), changed=changed, created=created)
+    return Stat(size=u64(values[0]), kind=found, modified=seconds(&values, 2), accessed=seconds(&values, 4), changed=changed, created=created)
 
 # --- names and paths from outside -------------------------------------------------
 

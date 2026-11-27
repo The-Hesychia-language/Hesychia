@@ -9,7 +9,7 @@ from net import Listener
 manual fn silent(owned listener: Listener):
     try:
         const conn: File = check net.accept(&listener)
-        check io.read_bytes_until(&conn, delimiter="")
+        check io.read_bytes_until(&conn, end="")
     except IoError as e:
         print(f"server: {e.reason}")
 

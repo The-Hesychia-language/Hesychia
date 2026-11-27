@@ -1,6 +1,7 @@
 from io import print
 from binary import Order, Width, read_u64, push_u16, push_u32, push_u64
 from elf import parse
+from binary import BinaryError
 from offsec.rop import find, chain, Gadget
 
 managed fn p16(out: vector[u8], v: i64, order: Order):
@@ -58,12 +59,23 @@ managed fn main():
         print(f"ret={rt:x}")
     if sc is None:
         print("syscall=none")
-    c = chain(Width.Bits64)
-    c.set_reg(0x400079, 0x1122334455667788)
+    c = chain()
+    if pr is not None:
+        c.set_reg(pr, 0x1122334455667788)
     c.raw(0x400078)
     b = c.bytes()
     print(f"chain={len(b)} {read_u64(b, 0, Order.Little):x} {read_u64(b, 8, Order.Little):x} {read_u64(b, 16, Order.Little):x}")
 # expect: pop_rdi=400079
 # expect: ret=40007a
 # expect: syscall=none
+    small = chain(Width.Bits32)
+    small.raw(0x8048000)
+    print(f"chain32={small.bytes()}")
+    small.raw(0x100000000)
+    try:
+        small.bytes()
+    except BinaryError as e:
+        print(e.reason)
 # expect: chain=24 400079 1122334455667788 400078
+# expect: chain32=[0, 128, 4, 8]
+# expect: address 4294967296 does not fit in 4 bytes

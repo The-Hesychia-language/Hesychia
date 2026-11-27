@@ -4,10 +4,10 @@
 #     const file: Elf = check elf.parse(&data)
 #     const pop_rdi: Optional[u64] = rop.find(&data, &file, Gadget.PopRdi)
 #     if pop_rdi is not None:
-#         mut c: Chain = rop.chain(Width.Bits64)
+#         mut c: Chain = rop.chain()                # x86-64; `rop.chain(Width.Bits32)`
 #         c.set_reg(pop_rdi, 0x404000)        # load a value into rdi
 #         c.raw(win_address)                   # then return into `win`
-#         const payload: vector[u8] = c.bytes()
+#         const payload: vector[u8] = check c.bytes()
 #
 # `find`/`find_gadget` search the executable segments for a byte pattern and return its virtual
 # address. The search is byte-exact and unaligned on purpose: a return-oriented gadget is any run
@@ -15,8 +15,9 @@
 # would miss. For a PIE binary the address is the static one; add the leaked base yourself.
 # `Chain` lays addresses and values into the bytes you place after the overflow padding.
 
-from binary import Width, Order
+from binary import Width, Order, BinaryError
 from elf import Elf, PF_X
+from offsec.payload import Part, flat
 
 # A common gadget, for `find`. Pop-register gadgets share their bytes between 32- and 64-bit
 # (they pop the e- register in 32-bit, the r- register in 64-bit); `Syscall` differs, so `find`
@@ -44,12 +45,12 @@ priv manual fn two(a: i64, b: i64) -> vector[u8]:
     return v
 
 # The byte pattern for `gadget`, for the ELF's class.
-priv manual fn gadget_bytes(gadget: Gadget, bits: Width) -> vector[u8]:
+priv manual fn gadget_bytes(gadget: Gadget, width: Width) -> vector[u8]:
     match gadget:
         case Gadget.Ret:
             return one(0xc3)
         case Gadget.Syscall:
-            if bits == Width.Bits64:
+            if width == Width.Bits64:
                 return two(0x0f, 0x05)
             return two(0xcd, 0x80)
         case Gadget.PopRax:
@@ -76,7 +77,7 @@ priv manual fn matches(data: &vector[u8], at: size, pattern: &vector[u8]) -> boo
     return True
 
 # The virtual address of the first `pattern` in an executable segment, or `None`.
-manual fn find_gadget(data: &vector[u8], file: &Elf, pattern: &vector[u8]) -> Optional[size]:
+manual fn find_gadget(data: &vector[u8], file: &Elf, pattern: &vector[u8]) -> Optional[u64]:
     if len(pattern) == 0:
         return None
     for seg in &file.segments:
@@ -89,19 +90,19 @@ manual fn find_gadget(data: &vector[u8], file: &Elf, pattern: &vector[u8]) -> Op
                 mut i: size = start
                 while i + len(pattern) <= end:
                     if matches(data, i, pattern):
-                        return size(seg.vaddr) + (i - start)
+                        return seg.vaddr + u64(i - start)
                     i += 1
     return None
 
 # The virtual address of a common `gadget`, or `None`.
-manual fn find(data: &vector[u8], file: &Elf, gadget: Gadget) -> Optional[size]:
-    const pattern: vector[u8] = gadget_bytes(gadget, file.header.bits)
+manual fn find(data: &vector[u8], file: &Elf, gadget: Gadget) -> Optional[u64]:
+    const pattern: vector[u8] = gadget_bytes(gadget, file.header.width)
     return find_gadget(data, file, &pattern)
 
 # A return-oriented chain: a sequence of words (addresses and values) to place on the stack. Each
 # word is 8 bytes for `Bits64`, 4 for `Bits32`, little-endian.
 manual struct Chain:
-    priv bits: Width
+    priv width: Width
     priv words: vector[u64]
 
     # Adds one raw word (a gadget address, a return address, or a value).
@@ -113,20 +114,15 @@ manual struct Chain:
         self.words.push(pop_gadget)
         self.words.push(value)
 
-    # The chain as bytes, to place after the padding (e.g. in a `payload.Part.Bytes`).
-    method bytes(&self) -> vector[u8]:
-        mut width: size = 8
-        if self.bits == Width.Bits32:
-            width = 4
-        mut out: vector[u8] = []
+    # The chain as bytes, to place after the padding (e.g. in a `payload.Part.Bytes`). Raises
+    # `BinaryError` when a word of a 32-bit chain does not fit 4 bytes, as `payload.flat` does.
+    method bytes(&self) -> vector[u8] raises BinaryError:
+        mut parts: vector[Part] = []
         for w in &self.words:
-            mut k: size = 0
-            while k < width:
-                out.push(u8((w >> u64(8 * k)) & u64(255)))
-                k += 1
-        return out
+            parts.push(Part.Address(w))
+        return check flat(parts, self.width, Order.Little)
 
-# A new, empty chain for a target of this class.
-manual fn chain(bits: Width) -> Chain:
+# A new, empty chain for a target of this class, x86-64 by default.
+manual fn chain(width: Width = Width.Bits64) -> Chain:
     mut words: vector[u64] = []
-    return Chain(bits=bits, words=words)
+    return Chain(width=width, words=words)

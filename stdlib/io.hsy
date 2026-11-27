@@ -153,17 +153,17 @@ manual fn read(f: &File, end: &str = "\n") -> Optional[str] raises IoError:
         out.pop()
     return check text_of(f, &out)
 
-# The bytes up to `delimiter`, left out unless `keep`; with `delimiter=""`, all that is left.
-# The bytes `read` returns as text, when the stream is binary or the marker need not be text.
-# Raises `IoError` when the stream ends before a non-empty `delimiter` appears.
-manual fn read_bytes_until(f: &File, delimiter: &str = "\n", keep: bool = False) -> vector[u8] raises IoError:
-    const (bytes, found): (vector[u8], bool) = check scan_until(f, delimiter)
-    if byte_len(delimiter) > 0 and not found:
+# The bytes up to `end`, left out unless `keep`; with `end=""`, all that is left. The bytes
+# `read` returns as text, when the stream is binary or the marker need not be text. Raises
+# `IoError` when the stream ends before a non-empty `end` appears.
+manual fn read_bytes_until(f: &File, end: &str = "\n", keep: bool = False) -> vector[u8] raises IoError:
+    const (bytes, found): (vector[u8], bool) = check scan_until(f, end)
+    if byte_len(end) > 0 and not found:
         raise IoError(path=f"{f.path}", reason=f"stream ended before the delimiter appeared")
     mut out: vector[u8] = bytes
     if keep and found:
-        for i in range(byte_len(delimiter)):
-            out.push(delimiter.byte(i))
+        for i in range(byte_len(end)):
+            out.push(end.byte(i))
     return out
 
 # Writes `prompt`, then reads a line; the input having ended is an error.
