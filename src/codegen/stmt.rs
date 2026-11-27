@@ -210,14 +210,18 @@ impl Emitter<'_> {
         self.line("}");
     }
 
-    /// `[x * 2 for x in v]`: a statement expression that fills a fresh vector.
+    /// `[x * 2 for x in v]` or `{k: v}`: a statement expression that fills a fresh collection.
     pub(super) fn emit_comprehension(&mut self, result: &str, fill: &Stmt, ty: &Type) -> String {
         let (out, indent) = (std::mem::take(&mut self.out), self.indent);
         self.indent = 0;
         let c_type = self.types.c_type(ty);
         let name = c_ident(result);
         self.line(&format!("{c_type} {name} = {{0}};"));
+        // Released if an error leaves the filling; given away as the value otherwise.
+        self.open_scope(false);
+        self.own(name.clone(), ty.clone());
         self.emit_stmt(fill);
+        self.close_scope(true);
         let body = std::mem::replace(&mut self.out, out);
         self.indent = indent;
         // Kept on separate lines: the body carries `#line` directives.

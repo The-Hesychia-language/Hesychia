@@ -497,6 +497,10 @@ fn names(expr: &Expr, out: &mut BTreeSet<String>) {
             names(iter, out);
             filter.iter().for_each(|f| names(f, out));
         }
+        ExprKind::Collection { keys, values, .. } => {
+            all(keys, out);
+            values.iter().for_each(|v| all(v, out));
+        }
         ExprKind::Lambda { captures, .. } => out.extend(captures.iter().map(|c| c.name.clone())),
         ExprKind::CallValue { callee, args } => {
             names(callee, out);

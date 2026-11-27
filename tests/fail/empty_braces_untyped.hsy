@@ -1,0 +1,3 @@
+managed fn main():
+    d = {}
+# error: the type of an empty `{}` cannot be inferred

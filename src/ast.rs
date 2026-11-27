@@ -577,6 +577,13 @@ pub enum ExprKind {
         filter: Option<Box<Expr>>,
         built: Option<(String, Box<Stmt>)>,
     },
+    /// `{k: v, ...}`, a `dict` (`values` holds the values), or `{a, b}`, a `set` (`values` is
+    /// `None`). The checker turns it into a hidden collection `result` filled by `fill`.
+    Collection {
+        keys: Vec<Expr>,
+        values: Option<Vec<Expr>>,
+        built: Option<(String, Box<Stmt>)>,
+    },
     /// A value of the enum variant `index`, with one expression per field.
     Variant {
         index: usize,

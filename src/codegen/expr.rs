@@ -128,10 +128,13 @@ impl Emitter<'_> {
             }
             ExprKind::Deref(inner) => format!("(*{})", self.emit_expr(inner)),
             ExprKind::CopyOf(inner) => self.emit_copy(inner),
-            ExprKind::Comprehension { built: Some((result, fill)), .. } => {
+            ExprKind::Comprehension { built: Some((result, fill)), .. }
+            | ExprKind::Collection { built: Some((result, fill)), .. } => {
                 self.emit_comprehension(result, fill, expr.ty())
             }
-            ExprKind::Comprehension { .. } => unreachable!("built by the checker"),
+            ExprKind::Comprehension { .. } | ExprKind::Collection { .. } => {
+                unreachable!("built by the checker")
+            }
             ExprKind::Tuple(items) | ExprKind::Construct(items) => {
                 self.emit_aggregate(expr.ty(), items, false)
             }

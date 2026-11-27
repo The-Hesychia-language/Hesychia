@@ -171,7 +171,8 @@ fn calls_in(expr: &Expr, out: &mut Vec<String>) {
                 calls_in(e, out);
             }
         }
-        ExprKind::Comprehension { built: Some((_, fill)), .. } => {
+        ExprKind::Comprehension { built: Some((_, fill)), .. }
+        | ExprKind::Collection { built: Some((_, fill)), .. } => {
             calls_in_stmts(std::slice::from_ref(fill), out)
         }
         _ => {}

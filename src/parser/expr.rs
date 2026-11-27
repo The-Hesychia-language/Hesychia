@@ -213,6 +213,7 @@ impl Parser {
             Tok::Kw(Kw::Lambda) => self.parse_lambda()?,
             Tok::Sym(Sym::LParen) => return self.parse_parenthesized(span),
             Tok::Sym(Sym::LBracket) => return self.parse_array_literal(span),
+            Tok::Sym(Sym::LBrace) => return self.parse_collection_literal(span),
             other => {
                 return Err(Diagnostic::error(
                     span,
@@ -322,6 +323,28 @@ impl Parser {
             items.push(self.parse_expr()?);
         }
         Ok(Expr::new(ExprKind::ArrayLit(items), span))
+    }
+
+    /// `{k: v, ...}` for a `dict`, `{a, b}` for a `set`, after `{`; `{}` is an empty `dict`.
+    fn parse_collection_literal(&mut self, span: Span) -> Result<Expr> {
+        let (mut keys, mut values) = (Vec::new(), Some(Vec::new()));
+        while !self.eat_sym(Sym::RBrace) {
+            if !keys.is_empty() {
+                self.expect_sym(Sym::Comma)?;
+                if self.eat_sym(Sym::RBrace) {
+                    break;
+                }
+            }
+            keys.push(self.parse_expr()?);
+            if keys.len() == 1 && !self.at(&Tok::Sym(Sym::Colon)) {
+                values = None;
+            }
+            if let Some(values) = &mut values {
+                self.expect_sym(Sym::Colon)?;
+                values.push(self.parse_expr()?);
+            }
+        }
+        Ok(Expr::new(ExprKind::Collection { keys, values, built: None }, span))
     }
 
     /// `[value for var in iter if filter]`, after `for`.

@@ -1,0 +1,53 @@
+from io import print
+
+# `{k: v}` is a `dict` and `{a, b}` a `set`, in both levels; `{}` is an empty `dict` where
+# its type is known.
+managed fn total(d: dict[str, i64]) -> i64:
+    t = 0
+    for _k, v in d.items():
+        t += v
+    return t
+
+managed fn read(text: str) -> dict[str, i64]:
+    return {"a": 1, "b": i64(text), "c": 3}
+
+# An error in the middle releases what the literal or comprehension had built.
+managed fn numbers(texts: vector[str]) -> vector[i64]:
+    return [i64(t) for t in texts]
+
+manual fn typed() -> dict[str, vector[i32]]:
+    const name: str = "s"
+    const by_name: dict[str, str] = {"k": name}
+    mut small: set[u8] = {u8(1), 2}
+    small.add(3)
+    mut empty: dict[str, vector[i32]] = {}
+    empty["k"] = [1]
+    print(f"{by_name} {small}")
+    return empty
+
+managed fn main():
+    d = {"a": 1, "b": 2}
+    s = {1, 2, 2, 3}
+    print(f"{d} {s} {len(s)} {"x" in {"x", "y",}}")
+    print(f"{total({"a": 5, "b": 6})} {typed()}")
+    nested = {
+        "p": [1, 2],
+        "q": [],
+    }
+    print(f"{nested} {[{"a": 1}, {"b": 2}]}")
+    try:
+        print(f"{read("2")}")
+        print(f"{read("z")}")
+    except ParseError as e:
+        print(e.reason)
+    try:
+        print(f"{numbers(["1", "x"])}")
+    except ParseError as e:
+        print(e.reason)
+# expect: {'a': 1, 'b': 2} {1, 2, 3} 3 True
+# expect: {'k': 's'} {1, 2, 3}
+# expect: 11 {'k': [1]}
+# expect: {'p': [1, 2], 'q': []} [{'a': 1}, {'b': 2}]
+# expect: {'a': 1, 'b': 2, 'c': 3}
+# expect: not a whole number
+# expect: not a whole number
