@@ -285,6 +285,7 @@ manual fn pair() -> (i64, str):
 p = pair()
 print(f"{p[0]} {p[1]}")
 n, s = pair()
+m, _ = pair()        # `_` discards, as often as needed; it cannot be read
 ```
 
 ### Function values

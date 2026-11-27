@@ -11,12 +11,14 @@ use crate::diag::{Diagnostic, Result, Span};
 use crate::lexer::{Kw, Sym, Tok, Token};
 
 pub fn parse(tokens: Vec<Token>) -> Result<ParsedFile> {
-    Parser { tokens, pos: 0 }.parse_file()
+    Parser { tokens, pos: 0, discards: 0 }.parse_file()
 }
 
 struct Parser {
     tokens: Vec<Token>,
     pos: usize,
+    /// Names given so far to `_`, each a variable of its own.
+    discards: usize,
 }
 
 impl Parser {
@@ -235,6 +237,22 @@ impl Parser {
             }
             _ => Err(self.unexpected("a name")),
         }
+    }
+
+    /// A name a value is bound to. `_` discards: each one becomes a hidden variable of its
+    /// own, which nothing can read, so `a, _ = f()` can be written twice in a block.
+    fn binding(&mut self) -> Result<String> {
+        let name = self.expect_ident()?;
+        Ok(self.discarded(&name))
+    }
+
+    /// `name`, or a new hidden name for `_`.
+    fn discarded(&mut self, name: &str) -> String {
+        if name != "_" {
+            return name.to_string();
+        }
+        self.discards += 1;
+        format!("{}{}", crate::ast::DISCARD, self.discards)
     }
 
     fn expect_str(&mut self) -> Result<String> {

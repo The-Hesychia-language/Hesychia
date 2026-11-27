@@ -349,9 +349,9 @@ impl Parser {
 
     /// `[value for var in iter if filter]`, after `for`.
     fn parse_comprehension(&mut self, value: Expr, span: Span) -> Result<Expr> {
-        let mut names = vec![self.expect_ident()?];
+        let mut names = vec![self.binding()?];
         while self.eat_sym(Sym::Comma) {
-            names.push(self.expect_ident()?);
+            names.push(self.binding()?);
         }
         let var = match names.as_slice() {
             [single] => single.clone(),
@@ -407,7 +407,7 @@ fn parse_format(parts: Vec<FormatPart>, span: Span) -> Result<Vec<Expr>> {
                 for token in &mut tokens {
                     token.span = Span::new(at.file, at.line, at.col + token.span.col);
                 }
-                let mut parser = Parser { tokens, pos: 0 };
+                let mut parser = Parser { tokens, pos: 0, discards: 0 };
                 let expr = parser.parse_expr()?;
                 if !matches!(parser.peek(), Tok::Newline | Tok::Eof) {
                     return Err(Diagnostic::error(parser.span(), "expected `}` after the expression"));

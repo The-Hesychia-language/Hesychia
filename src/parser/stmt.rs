@@ -40,7 +40,7 @@ impl Parser {
                 self.advance();
                 let value = self.parse_expr()?;
                 self.expect_kw(Kw::As)?;
-                let name = self.expect_ident()?;
+                let name = self.binding()?;
                 StmtKind::With { value, name, body: self.parse_block()? }
             }
             Tok::Kw(Kw::Comptime) => return self.parse_comptime_stmt(),
@@ -187,11 +187,11 @@ impl Parser {
     /// `name`, or `(a, b)` to take a tuple apart.
     fn parse_var_target(&mut self) -> Result<VarTarget> {
         if !self.eat_sym(Sym::LParen) {
-            return self.expect_ident().map(VarTarget::Name);
+            return self.binding().map(VarTarget::Name);
         }
-        let mut names = vec![self.expect_ident()?];
+        let mut names = vec![self.binding()?];
         while self.eat_sym(Sym::Comma) {
-            names.push(self.expect_ident()?);
+            names.push(self.binding()?);
         }
         self.expect_sym(Sym::RParen)?;
         Ok(VarTarget::Tuple(names))
@@ -209,9 +209,9 @@ impl Parser {
         if let crate::ast::ExprKind::Name(first) = &target.kind
             && self.at(&Tok::Sym(Sym::Comma))
         {
-            let mut names = vec![first.clone()];
+            let mut names = vec![self.discarded(first)];
             while self.eat_sym(Sym::Comma) {
-                names.push(self.expect_ident()?);
+                names.push(self.binding()?);
             }
             self.expect_sym(Sym::Assign)?;
             let value = self.parse_expr()?;
@@ -225,6 +225,10 @@ impl Parser {
         };
         self.advance();
         let value = self.parse_expr()?;
+        // `_ = f()` computes `f()` and lets its value go at once.
+        if op.is_none() && matches!(&target.kind, crate::ast::ExprKind::Name(n) if n == "_") {
+            return Ok(StmtKind::Expr(value));
+        }
         Ok(StmtKind::Assign { target, op, value })
     }
 
@@ -242,9 +246,9 @@ impl Parser {
     fn parse_for(&mut self) -> Result<StmtKind> {
         let span = self.span();
         self.advance();
-        let mut names = vec![self.expect_ident()?];
+        let mut names = vec![self.binding()?];
         while self.eat_sym(Sym::Comma) {
-            names.push(self.expect_ident()?);
+            names.push(self.binding()?);
         }
         self.expect_kw(Kw::In)?;
         let iter = self.parse_expr()?;

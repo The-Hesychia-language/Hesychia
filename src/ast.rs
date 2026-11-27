@@ -309,6 +309,10 @@ impl TypeExpr {
 /// The start of the hidden name of a `for a, b in ...` loop's item.
 pub const LOOP_ITEM: &str = "hsy_item_";
 
+/// The hidden names `_` becomes where it is bound; starting with `_`, they are never warned
+/// about.
+pub const DISCARD: &str = "_hsy_discard";
+
 #[derive(Clone)]
 pub struct Stmt {
     pub kind: StmtKind,
