@@ -3,7 +3,7 @@ import time
 from thread import spawn, channel
 
 manual fn produce(owned tx: sender[str]):
-    time.sleep(20, unit=time.ms)
+    time.sleep(20, unit=time.Unit.Ms)
     tx.send("late")
 
 managed fn main():
@@ -23,7 +23,7 @@ managed fn main():
     select:
         case words.receive():
             print("no")
-        case time.sleep(10, unit=time.ms):
+        case time.sleep(10, unit=time.Unit.Ms):
             print("too slow")
     t = spawn(produce, texts)
     select:

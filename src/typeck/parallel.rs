@@ -232,8 +232,14 @@ impl Checker<'_> {
         }
         let mut duration =
             duration.ok_or_else(|| Diagnostic::error(span, "missing argument `duration` for `sleep`"))?;
-        // `time.s`, the default unit of `sleep`, in nanoseconds.
-        let mut unit = unit.unwrap_or_else(|| Expr::new(ExprKind::Int(1_000_000_000), span));
+        // The unit's length in nanoseconds; a second, the default unit of `sleep`.
+        let mut unit = match unit {
+            Some(unit) => {
+                let (receiver, name) = (Box::new(unit), "nanoseconds".to_string());
+                Expr::new(ExprKind::Method { receiver, name, type_args: Vec::new(), args: Vec::new() }, span)
+            }
+            None => Expr::new(ExprKind::Int(1_000_000_000), span),
+        };
         self.check_value(&mut duration, &Type::Float(crate::types::FloatTy::F64))?;
         self.check_value(&mut unit, &Type::Int(IntTy::I64))?;
         wait.kind = ExprKind::Builtin { op: Builtin::SelectSleep, args: vec![duration, unit] };

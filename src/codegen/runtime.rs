@@ -637,12 +637,8 @@ static void hsy_chan_unwatch(hsy_chan* c, hsy_watch* w) {
     pthread_mutex_unlock(&c->lock);
 }
 
-/* A time limit in nanoseconds, from `time.sleep(duration, unit)`. */
+/* A time limit in nanoseconds, from `time.sleep(duration, unit)`, the unit in nanoseconds. */
 HSY_UNUSED static int64_t hsy_select_limit(double duration, int64_t unit) {
-    if (unit != 3600000000000 && unit != 60000000000 && unit != 1000000000 && unit != 1000000 && unit != 1000 && unit != 1) {
-        fputs("time: the unit is time.h, time.m, time.s, time.ms, time.us or time.ns\n", stderr);
-        hsy_panic();
-    }
     return duration > 0 ? (int64_t)(duration * (double)unit) : 0;
 }
 

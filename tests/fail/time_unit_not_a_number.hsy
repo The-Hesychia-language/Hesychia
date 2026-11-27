@@ -1,0 +1,5 @@
+import time
+
+managed fn main():
+    time.sleep(1, unit=1000)
+# error: expected `Unit`

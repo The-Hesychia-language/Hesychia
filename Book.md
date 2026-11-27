@@ -914,7 +914,7 @@ Wait for the first ready channel, with a timeout or `else`.
 select:
     case msg = rx.receive():
         print(f"{msg}")
-    case time.sleep(2, unit=time.s):
+    case time.sleep(2, unit=time.Unit.S):
         print("timeout")
 ```
 
@@ -1054,8 +1054,8 @@ Clocks, durations and dates.
 import time
 
 start = time.now()
-time.sleep(10, unit=time.ms)
-print(f"{time.elapsed(start, unit=time.ms)}")
+time.sleep(10, unit=time.Unit.Ms)
+print(f"{time.elapsed(start, unit=time.Unit.Ms)}")
 ```
 
 ### `os`
