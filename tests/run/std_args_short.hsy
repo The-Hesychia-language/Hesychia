@@ -15,7 +15,7 @@ manual struct Options:
 
 managed fn run(words: vector[str]):
     try:
-        o = args.to_struct[Options](words)
+        o = args.parse[Options](words)
         print(f"{o.address} {o.output} {o.verbose} {o.retries}")
     except ArgsError as e:
         print(f"error: {e.reason}")

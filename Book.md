@@ -1091,7 +1091,8 @@ managed struct Options:
     @short("v")
     verbose: bool = False
 
-o = args.parse[Options]()      # tool a.txt --retries 5 -v
+o = args.from_command_line[Options]()   # tool a.txt --retries 5 -v
+t = args.parse[Options](words)          # given words; raises ArgsError
 ```
 
 ### `scan`

@@ -33,14 +33,14 @@ manual enum Command:
 
 managed fn copy(words: vector[str]):
     try:
-        o = args.to_struct[Options](words)
+        o = args.parse[Options](words)
         print(f"{o.source} {o.target} {o.retries} {o.verbose} {o.report} {o.dry_run}")
     except ArgsError as e:
         print(f"error: {e.reason}")
 
 managed fn command(words: vector[str]):
     try:
-        match args.to_struct[Command](words):
+        match args.parse[Command](words):
             case Command.Build(release, jobs):
                 print(f"build {release} {jobs}")
             case Command.Run(path, watch):
@@ -61,10 +61,10 @@ managed fn main():
     copy(["a", "b", "--color", "red"])
     copy(["a", "b", "--verbose=yes"])
     copy(["a", "b", "-v"])
-    sum = args.to_struct[Sum](["1", "-2", "30", "--limit", "9", "--scale", "0.5"])
+    sum = args.parse[Sum](["1", "-2", "30", "--limit", "9", "--scale", "0.5"])
     print(f"{sum.numbers} {sum.limit} {sum.scale}")
     try:
-        args.to_struct[Sum](["--limit", "300"])
+        args.parse[Sum](["--limit", "300"])
     except ArgsError as e:
         print(f"error: {e.reason}")
     command(["build"])

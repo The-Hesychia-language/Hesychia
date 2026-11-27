@@ -8,5 +8,5 @@ manual struct Options:
     shape: Shape = Shape.Square
 
 manual fn main():
-    const o: Options = args.parse[Options]()
+    const o: Options = args.from_command_line[Options]()
 # error: args reads an enum whose cases carry no data
