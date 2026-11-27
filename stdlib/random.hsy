@@ -31,7 +31,7 @@ manual fn seed(n: u64):
 priv manual fn bits() -> u64:
     const s: ptr[u64] = state()
     if s[4] == 0:
-        seed(u64(time.timestamp(unit=time.ns)))
+        seed(u64(time.timestamp(unit=time.Unit.Ns)))
     const result: u64 = rotate(s[1].wrapping_mul(5), 7).wrapping_mul(9)
     const t: u64 = s[1] << 17
     s[2] ^= s[0]
