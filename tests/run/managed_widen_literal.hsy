@@ -1,0 +1,18 @@
+from io import print
+
+# A literal too large for an inferred variable widens it, as a wider value does.
+managed fn steps(limit: i32) -> i64:
+    count = 0
+    i = 0
+    while i < limit:
+        count += 5000000000
+        i += 1
+    return count
+
+managed fn main():
+    low = 0
+    low -= 5000000000
+    reset = 1
+    reset = 3000000000
+    print(f"{steps(2)} {low} {reset}")
+# expect: 10000000000 -5000000000 3000000000

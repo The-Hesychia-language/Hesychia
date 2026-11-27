@@ -126,6 +126,23 @@ impl Checker<'_> {
         self.recheck = true;
         Ok(true)
     }
+
+    /// The type a value assigned to an inferred variable is checked against: none for an
+    /// integer literal the variable cannot hold, which then takes its own type and widens it.
+    pub(super) fn widening_hint<'t>(&self, value: &Expr, current: &'t Type) -> Option<&'t Type> {
+        let literal = match &value.kind {
+            ExprKind::Int(n) => Some(*n),
+            ExprKind::Unary(crate::ast::UnOp::Neg, operand) => match operand.kind {
+                ExprKind::Int(n) => Some(-n),
+                _ => None,
+            },
+            _ => None,
+        };
+        match (literal, current) {
+            (Some(n), Type::Int(ty)) if self.managed && !ty.fits(n) => None,
+            _ => Some(current),
+        }
+    }
 }
 
 /// `size` to `i64`: a length, which fits in practice; converted with a check, but quietly.
