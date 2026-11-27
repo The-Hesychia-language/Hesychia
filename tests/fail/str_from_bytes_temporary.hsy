@@ -1,0 +1,5 @@
+import fs
+
+managed fn main():
+    t = str.from_bytes(fs.read_bytes("x"))
+# error: `str.from_bytes` borrows its bytes, and these are a temporary value

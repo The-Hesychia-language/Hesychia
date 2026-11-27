@@ -139,7 +139,7 @@ len(s)          # 3
 byte_len(s)     # 5
 s = s + "!"
 data = s.bytes()           # vector[u8], the UTF-8 bytes
-back = str.from_bytes(data)  # Optional[str]
+back = str.from_bytes(data)  # Optional[str]; borrows a variable, not str.from_bytes(s.bytes())
 text = str.from_any_bytes(data)  # str: bad bytes become �
 ```
 

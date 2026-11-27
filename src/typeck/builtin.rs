@@ -291,6 +291,13 @@ impl Checker<'_> {
             let arg = match found {
                 Type::Ref(inner, _) if *inner == bytes => arg,
                 ty if ty == bytes && self.place_of(&arg).is_some() => borrow(arg, false),
+                ty if ty == bytes => {
+                    return Err(Diagnostic::error(
+                        arg.span,
+                        "`str.from_bytes` borrows its bytes, and these are a temporary value",
+                    )
+                    .with_hint("store them in a variable first, then pass the variable: `data = ...`, `str.from_bytes(data)`"));
+                }
                 ty => {
                     return Err(Diagnostic::error(
                         arg.span,
