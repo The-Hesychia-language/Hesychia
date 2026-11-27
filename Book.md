@@ -769,6 +769,7 @@ manual fn total[N: size](values: &array[i64, N]) -> i64:
 A file is a module, a folder is a package.
 ```python
 import shop.cart              # shop/cart.hsy, used as cart.name
+import fs                     # its types too: fs.Stat
 from io import print
 from lib.util import twice as double
 ```

@@ -97,7 +97,7 @@ impl Parser {
         if self.eat_sym(Sym::Colon) { self.parse_type().map(Some) } else { Ok(None) }
     }
 
-    /// Parses a type such as `i32`, `ptr[u8]`, `&mut Point` or `(i32, f64)`.
+    /// Parses a type such as `i32`, `ptr[u8]`, `&mut Point`, `(i32, f64)` or `fs.Stat`.
     fn parse_type(&mut self) -> Result<TypeExpr> {
         let span = self.span();
         match self.peek().clone() {
@@ -139,7 +139,12 @@ impl Parser {
                 Ok(TypeExpr::Size(n, span))
             }
             _ => {
-                let name = self.expect_ident()?;
+                let mut name = self.expect_ident()?;
+                // `fs.Stat`: a type reached through its module.
+                while self.eat_sym(Sym::Dot) {
+                    name.push('.');
+                    name.push_str(&self.expect_ident()?);
+                }
                 if self.eat_sym(Sym::LParen) {
                     let mut args = Vec::new();
                     while !self.eat_sym(Sym::RParen) {

@@ -1,0 +1,28 @@
+import io
+import fs
+import json
+from io import print
+
+# A type reached through its module, wherever a type is written: `fs.Stat`, `io.IoError`.
+manual fn kind_of(path: &str) -> fs.Kind raises io.IoError:
+    const st: fs.Stat = check fs.stat(path)
+    return st.kind
+
+manual fn describe(value: &json.Value) -> str:
+    match value:
+        case json.Value.Number(n):
+            return f"number {n}"
+        case _:
+            return "other"
+
+manual fn main():
+    try:
+        print(f"{check kind_of(".") == fs.Kind.Dir}")
+    except io.IoError as _e:
+        print("error")
+    const kinds: vector[fs.Kind] = [fs.Kind.File, fs.Kind.Dir]
+    const none: Optional[fs.Stat] = None
+    const two: json.Value = json.Value.Number(2.0)
+    print(f"{len(kinds)} {none is None} {describe(&two)}")
+# expect: True
+# expect: 2 True number 2.0

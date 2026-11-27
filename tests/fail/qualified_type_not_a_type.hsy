@@ -1,0 +1,5 @@
+import fs
+
+manual fn main():
+    const x: fs.join = 1
+# error: `fs.join` is not a type
