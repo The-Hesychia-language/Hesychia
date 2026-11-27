@@ -92,7 +92,7 @@ managed fn build() -> vector[u8]:
 managed fn main():
     data = build()
     file = parse(data)
-    print(f"{file.header.entry:x} {file.header.kind} {file.header.machine} {file.header.bits}")
+    print(f"{file.header.entry:x} {file.header.kind} {file.header.machine} {file.header.width}")
     print(f"segs={len(file.segments)} secs={len(file.sections)} syms={len(file.symbols)}")
     s = find_section(file, ".symtab")
     if s is not None:

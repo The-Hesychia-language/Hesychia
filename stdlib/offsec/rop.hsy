@@ -96,7 +96,7 @@ manual fn find_gadget(data: &vector[u8], file: &Elf, pattern: &vector[u8]) -> Op
 
 # The virtual address of a common `gadget`, or `None`.
 manual fn find(data: &vector[u8], file: &Elf, gadget: Gadget) -> Optional[u64]:
-    const pattern: vector[u8] = gadget_bytes(gadget, file.header.bits)
+    const pattern: vector[u8] = gadget_bytes(gadget, file.header.width)
     return find_gadget(data, file, &pattern)
 
 # A return-oriented chain: a sequence of words (addresses and values) to place on the stack. Each
