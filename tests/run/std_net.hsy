@@ -33,12 +33,15 @@ managed fn main():
 
     a = net.udp("127.0.0.1", 47211)
     b = net.udp("127.0.0.1", 47212)
-    net.send(a, "ping", "127.0.0.1", 47212)
+    net.send(a, "ping".bytes(), "127.0.0.1", 47212)
     message, sender = net.receive(b)
-    print(f"{message} from {sender}")
-    net.send(b, "pong", "127.0.0.1", 47211)
+    print(f"{str.from_any_bytes(message)} from {sender}")
+    net.send(b, [u8(0), u8(255), u8(10)], "127.0.0.1", 47211)
     reply, _ = net.receive(a)
-    print(reply)
+    print(f"{reply}")
+    net.send(b, vector[u8](), "127.0.0.1", 47211)
+    empty, _from = net.receive(a)
+    print(f"{len(empty)}")
 
     quiet = net.udp("127.0.0.1", 47213, timeout=0.2)
     try:
@@ -66,7 +69,8 @@ managed fn main():
 # expect: echo hello
 # expect: echo été 2026
 # expect: ping from 127.0.0.1:47211
-# expect: pong
+# expect: [0, 255, 10]
+# expect: 0
 # expect: receive: timed out
 # expect: accept: timed out
 # expect: read: timed out
