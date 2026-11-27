@@ -1275,7 +1275,8 @@ Ready-made null-free `execve("/bin/sh")` machine code.
 from offsec.shellcode import sh
 from binary import Width
 
-code = sh(Width.Bits64)
+code = sh()                   # x86-64
+code32 = sh(Width.Bits32)
 ```
 
 ### `offsec.encode`
@@ -1292,19 +1293,19 @@ Find gadgets in an ELF and build a return-oriented chain.
 ```python
 from offsec.rop import find, chain, Gadget
 
-pop = find(data, file, Gadget.PopRdi)
-c = chain(64)
-c.set_reg(pop, 0x404000)
-bytes = c.bytes()
+pop = find(data, file, Gadget.PopRdi)    # Optional[u64]
+c = chain()                              # x86-64; chain(Width.Bits32)
+if pop is not None:
+    c.set_reg(pop, 0x404000)
+words = c.bytes()
 ```
 
 ### `offsec.fmt`
 Build a `printf` format-string write of a value to an address.
 ```python
 from offsec.fmt import write
-from binary import Width
 
-payload = write(0x404040, 0xdeadbeef, offset=6, bits=Width.Bits64)
+payload = write(0x404040, 0xdeadbeef, offset=6)    # x86-64; width=Width.Bits32
 ```
 
 ### `offsec.tube`
